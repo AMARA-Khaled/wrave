@@ -251,7 +251,18 @@ async function handleCompanionCommand(cmd) {
         const results = await chrome.scripting.executeScript({
           target: { tabId },
           func: (sel) => {
-            const el = document.querySelector(sel);
+            let el = null;
+            if (sel && !sel.startsWith('text:')) {
+              try { el = document.querySelector(sel); } catch {}
+            }
+            if (!el && sel) {
+              const query = sel.replace(/^text:/i, '').trim().toLowerCase();
+              const all = Array.from(document.querySelectorAll('div, span, p, a, button, h1, h2, h3, h4'));
+              const matches = all.filter(e => e.children.length <= 2 && e.innerText && e.innerText.trim().toLowerCase().includes(query));
+              if (matches.length > 0) {
+                el = matches[0].closest('div[role="button"], a, div[tabindex], button') || matches[0];
+              }
+            }
             if (!el) return { success: false, error: 'Element not found: ' + sel };
             el.scrollIntoView({ block: 'center' });
             el.click();
@@ -268,16 +279,43 @@ async function handleCompanionCommand(cmd) {
         const results = await chrome.scripting.executeScript({
           target: { tabId },
           func: (sel, text, clear) => {
-            const el = document.querySelector(sel);
-            if (!el) return { success: false, error: 'Element not found: ' + sel };
+            let el = sel ? document.querySelector(sel) : null;
+            if (!el) {
+              el = document.querySelector('div[contenteditable="true"], div[role="textbox"], textarea, input[type="text"]');
+            }
+            if (!el) return { success: false, error: 'Input element not found' };
             el.focus();
-            if (clear) el.value = '';
-            el.value += text;
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            return { success: true, value: el.value };
+            if (el.isContentEditable) {
+              if (clear) el.innerText = '';
+              document.execCommand('insertText', false, text);
+            } else {
+              if (clear) el.value = '';
+              el.value += text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            return { success: true, textEntered: text };
           },
-          args: [params.selector, params.text, params.clear_first]
+          args: [params.selector || '', params.text || '', !!params.clear_first]
+        });
+        reply(results && results[0] ? results[0].result : { success: false });
+        break;
+      }
+
+      case 'page_press_key': {
+        const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (keyName) => {
+            const active = document.activeElement || document.body;
+            const code = keyName === 'Enter' ? 13 : 0;
+            const eventInit = { key: keyName, code: keyName, keyCode: code, which: code, bubbles: true, cancelable: true };
+            active.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+            active.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+            active.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+            return { success: true, key: keyName };
+          },
+          args: [params.key]
         });
         reply(results && results[0] ? results[0].result : { success: false });
         break;

@@ -346,11 +346,13 @@ export class WraveMcpServer {
           };
         }
         case 'wrave_get_dom_tree':
-          return await this.sendBridgeCommand('page_get_dom', { tabId: args.tab_id, html: false });
+          return await this.sendBridgeCommand('page_get_dom', { tabId: args.tab_id, html: !!args.html });
         case 'wrave_click':
-          return await this.sendBridgeCommand('page_click', { tabId: args.tab_id, selector: args.selector, x: args.x, y: args.y });
+          return await this.sendBridgeCommand('page_click', { tabId: args.tab_id, selector: args.selector || '', x: args.x, y: args.y });
         case 'wrave_type_text':
-          return await this.sendBridgeCommand('page_type_text', { tabId: args.tab_id, selector: args.selector, text: args.text, clear_first: args.clear_first });
+          return await this.sendBridgeCommand('page_type_text', { tabId: args.tab_id, selector: args.selector || '', text: args.text || '', clear_first: !!args.clear_first });
+        case 'wrave_press_key':
+          return await this.sendBridgeCommand('page_press_key', { tabId: args.tab_id, key: args.key });
         case 'wrave_execute_script':
           return await this.sendBridgeCommand('page_execute_js', { tabId: args.tab_id, script: args.script });
         case 'wrave_get_cookies':
