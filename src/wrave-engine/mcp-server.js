@@ -479,24 +479,10 @@ export class WraveMcpServer {
           }
         }
 
-        // Health / Diagnostic Endpoint
-        if (req.method === 'GET' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/health')) {
-          const cdpAvailable = await this.cdpEngine.isCdpAvailable();
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            status: 'running',
-            name: 'wrave-mcp-server',
-            version: '1.1.0',
-            securityMode: this.cdpEngine?.securityMode || 'ask_validation',
-            cdpConnected: cdpAvailable,
-            extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === 1),
-            tools: this.getToolsDefinition().map(t => t.name),
-          }));
-          return;
-        }
+        const acceptsSse = (req.headers.accept || '').includes('text/event-stream');
 
-        // SSE Endpoint (MCP Specification)
-        if (req.method === 'GET' && parsedUrl.pathname === '/mcp/sse') {
+        // SSE Endpoint (MCP Specification) - supports both /mcp/sse and /mcp with SSE accept header
+        if (req.method === 'GET' && (parsedUrl.pathname === '/mcp/sse' || (parsedUrl.pathname === '/mcp' && acceptsSse))) {
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -518,6 +504,22 @@ export class WraveMcpServer {
             clearInterval(heartbeat);
             this.sseSessions.delete(sessionId);
           });
+          return;
+        }
+
+        // Health / Diagnostic Endpoint (JSON)
+        if (req.method === 'GET' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/health')) {
+          const cdpAvailable = await this.cdpEngine.isCdpAvailable();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            status: 'running',
+            name: 'wrave-mcp-server',
+            version: '1.1.0',
+            securityMode: this.cdpEngine?.securityMode || 'ask_validation',
+            cdpConnected: cdpAvailable,
+            extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === 1),
+            tools: this.getToolsDefinition().map(t => t.name),
+          }));
           return;
         }
 
