@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Wrave High-Speed CDP Automation Engine
  * Connects directly to Chromium / Brave remote debugging protocol (CDP).
  */
@@ -6,6 +6,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import WebSocket from 'ws';
+import {
+  CdpOptions,
+  SecurityMode,
+  TabInfo,
+  TabState,
+  ScreenshotResult,
+} from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,20 +26,36 @@ try {
   }
 } catch {}
 
+interface CdpSession {
+  tabId: string;
+  ws: WebSocket;
+  messageId: number;
+  callbacks: Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>;
+  consoleLogs: Array<{ type: string; args: any[]; timestamp: number }>;
+}
+
 export class WraveCdpEngine {
-  constructor(options = {}) {
+  public cdpHost: string;
+  public cdpPort: number;
+  public securityMode: SecurityMode;
+  public alwaysAllowedDomains: Set<string>;
+  private sessions: Map<string, CdpSession>;
+  private _cdpAvailableCache: boolean = false;
+  private _cdpCacheTime: number = 0;
+
+  constructor(options: CdpOptions = {}) {
     this.cdpHost = options.host || '127.0.0.1';
     this.cdpPort = options.port || 9222;
-    this.securityMode = options.securityMode || 'ask_validation'; // 'full_access' | 'ask_validation' | 'restricted'
-    this.alwaysAllowedDomains = new Set();
-    this.sessions = new Map(); // targetId -> { ws, messageId, callbacks, consoleLogs }
+    this.securityMode = options.securityMode || 'ask_validation';
+    this.alwaysAllowedDomains = new Set<string>();
+    this.sessions = new Map<string, CdpSession>();
   }
 
-  get cdpBaseUrl() {
+  get cdpBaseUrl(): string {
     return `http://${this.cdpHost}:${this.cdpPort}`;
   }
 
-  async isCdpAvailable() {
+  async isCdpAvailable(): Promise<boolean> {
     const now = Date.now();
     if (this._cdpCacheTime && (now - this._cdpCacheTime < 10000)) {
       return this._cdpAvailableCache;
@@ -48,16 +72,16 @@ export class WraveCdpEngine {
     return this._cdpAvailableCache;
   }
 
-  async getVersionInfo() {
+  async getVersionInfo(): Promise<any> {
     const res = await fetch(`${this.cdpBaseUrl}/json/version`);
     return await res.json();
   }
 
   // --- TAB MANAGEMENT (CRUD) ---
 
-  async listTabs() {
+  async listTabs(): Promise<TabInfo[]> {
     const res = await fetch(`${this.cdpBaseUrl}/json/list`);
-    const targets = await res.json();
+    const targets = (await res.json()) as any[];
     return targets
       .filter((t) => t.type === 'page')
       .map((t) => ({
@@ -65,16 +89,15 @@ export class WraveCdpEngine {
         title: t.title,
         url: t.url,
         active: !t.url.startsWith('chrome-extension://'),
-        webSocketDebuggerUrl: t.webSocketDebuggerUrl,
       }));
   }
 
-  async openTab(url = 'about:blank', activate = true) {
+  async openTab(url = 'about:blank', activate = true): Promise<any> {
     const encodedUrl = encodeURIComponent(url);
     const res = await fetch(`${this.cdpBaseUrl}/json/new?${encodedUrl}`, {
       method: 'PUT',
     });
-    const tab = await res.json();
+    const tab = (await res.json()) as any;
     if (activate && tab.id) {
       await this.focusTab(tab.id);
     }
@@ -86,48 +109,48 @@ export class WraveCdpEngine {
     };
   }
 
-  async closeTab(tabId) {
+  async closeTab(tabId: string): Promise<any> {
     try {
       if (this.sessions.has(tabId)) {
-        const s = this.sessions.get(tabId);
+        const s = this.sessions.get(tabId)!;
         try { s.ws.close(); } catch {}
         this.sessions.delete(tabId);
       }
       const res = await fetch(`${this.cdpBaseUrl}/json/close/${tabId}`);
       const text = await res.text();
       return { id: tabId, status: 'closed', response: text };
-    } catch (err) {
+    } catch (err: any) {
       return { id: tabId, status: 'error', error: err.message };
     }
   }
 
-  async focusTab(tabId) {
+  async focusTab(tabId: string): Promise<any> {
     const res = await fetch(`${this.cdpBaseUrl}/json/activate/${tabId}`);
     const text = await res.text();
     return { id: tabId, status: 'focused', response: text };
   }
 
-  async reloadTab(tabId, ignoreCache = false) {
+  async reloadTab(tabId: string, ignoreCache = false): Promise<any> {
     await this.sendCdpCommand(tabId, 'Page.reload', { ignoreCache });
     return { id: tabId, status: 'reloaded' };
   }
 
   // --- CDP SESSION & PROTOCOL HANDLING ---
 
-  async ensureSession(tabId) {
+  async ensureSession(tabId: string): Promise<CdpSession> {
     if (this.sessions.has(tabId)) {
-      const s = this.sessions.get(tabId);
+      const s = this.sessions.get(tabId)!;
       if (s.ws.readyState === WebSocket.OPEN) return s;
     }
 
-    const tabs = await fetch(`${this.cdpBaseUrl}/json/list`).then((r) => r.json());
+    const tabs = (await fetch(`${this.cdpBaseUrl}/json/list`).then((r) => r.json())) as any[];
     const target = tabs.find((t) => t.id === tabId);
     if (!target || !target.webSocketDebuggerUrl) {
       throw new Error(`Tab ${tabId} not found or has no debugger websocket`);
     }
 
     const ws = new WebSocket(target.webSocketDebuggerUrl);
-    const session = {
+    const session: CdpSession = {
       tabId,
       ws,
       messageId: 1,
@@ -136,26 +159,28 @@ export class WraveCdpEngine {
     };
 
     await new Promise((resolve, reject) => {
-      ws.onopen = resolve;
-      ws.onerror = reject;
+      ws.on('open', resolve);
+      ws.on('error', reject);
     });
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.id && session.callbacks.has(data.id)) {
-        const { resolve, reject } = session.callbacks.get(data.id);
-        session.callbacks.delete(data.id);
-        if (data.error) reject(new Error(data.error.message));
-        else resolve(data.result);
-      } else if (data.method === 'Runtime.consoleAPICalled') {
-        session.consoleLogs.push({
-          type: data.params.type,
-          args: data.params.args.map((a) => a.value || a.description),
-          timestamp: Date.now(),
-        });
-        if (session.consoleLogs.length > 200) session.consoleLogs.shift();
-      }
-    };
+    ws.on('message', (dataStr: any) => {
+      try {
+        const data = JSON.parse(dataStr.toString());
+        if (data.id && session.callbacks.has(data.id)) {
+          const { resolve, reject } = session.callbacks.get(data.id)!;
+          session.callbacks.delete(data.id);
+          if (data.error) reject(new Error(data.error.message));
+          else resolve(data.result);
+        } else if (data.method === 'Runtime.consoleAPICalled') {
+          session.consoleLogs.push({
+            type: data.params.type,
+            args: data.params.args.map((a: any) => a.value || a.description),
+            timestamp: Date.now(),
+          });
+          if (session.consoleLogs.length > 200) session.consoleLogs.shift();
+        }
+      } catch {}
+    });
 
     this.sessions.set(tabId, session);
 
@@ -174,7 +199,7 @@ export class WraveCdpEngine {
     return session;
   }
 
-  async sendCdpCommand(tabId, method, params = {}) {
+  async sendCdpCommand(tabId: string, method: string, params: Record<string, any> = {}): Promise<any> {
     const session = await this.ensureSession(tabId);
     const id = session.messageId++;
     return new Promise((resolve, reject) => {
@@ -185,7 +210,7 @@ export class WraveCdpEngine {
 
   // --- SECURITY ENFORCEMENT ---
 
-  async validateAction(tabId, actionType, details = {}) {
+  async validateAction(tabId: string, actionType: string, details: Record<string, any> = {}): Promise<boolean> {
     if (this.securityMode === 'full_access') return true;
 
     if (this.securityMode === 'restricted') {
@@ -196,7 +221,6 @@ export class WraveCdpEngine {
       return true;
     }
 
-    // 'ask_validation' mode: Intercept sensitive form submissions / passwords
     if (details.isPassword || details.isPayment) {
       throw new Error(`Action blocked: Sensitive password or payment interaction requires manual user confirmation.`);
     }
@@ -206,7 +230,7 @@ export class WraveCdpEngine {
 
   // --- DOM & ACCESSIBILITY INSPECTION ---
 
-  async getTabState(tabId) {
+  async getTabState(tabId: string): Promise<TabState> {
     const evalRes = await this.sendCdpCommand(tabId, 'Runtime.evaluate', {
       expression: `({
         title: document.title,
@@ -221,7 +245,7 @@ export class WraveCdpEngine {
     return evalRes.result.value;
   }
 
-  async getDomTree(tabId, maxDepth = 4) {
+  async getDomTree(tabId: string, maxDepth = 4): Promise<any> {
     const script = `
       (function extractTree(node, depth, max) {
         if (!node || depth > max) return null;
@@ -265,20 +289,20 @@ export class WraveCdpEngine {
     return res.result.value;
   }
 
-  async getAccessibilityTree(tabId) {
+  async getAccessibilityTree(tabId: string): Promise<any> {
     return await this.sendCdpCommand(tabId, 'Accessibility.getFullAXTree');
   }
 
   // --- SCREENSHOT CAPTURE ---
 
-  async takeScreenshot(tabId, format = 'png', quality = 80, fullPage = false) {
-    let clip = undefined;
+  async takeScreenshot(tabId: string, format = 'png', quality = 80, fullPage = false): Promise<ScreenshotResult> {
+    let clip: any = undefined;
     if (fullPage) {
       const metrics = await this.sendCdpCommand(tabId, 'Page.getLayoutMetrics');
       const { width, height } = metrics.contentSize;
       clip = { x: 0, y: 0, width, height, scale: 1 };
     }
-    const params = { format, fromSurface: true };
+    const params: any = { format, fromSurface: true };
     if (format === 'jpeg') params.quality = quality;
     if (clip) params.clip = clip;
 
@@ -286,14 +310,14 @@ export class WraveCdpEngine {
     return {
       format,
       dataBase64: res.data,
-      sizeBytes: Math.round((res.data.length * 3) / 4),
+      mimeType: `image/${format}`,
     };
   }
 
   // --- DIRECT MOUSE & KEYBOARD INTERACTION ---
 
-  async click(tabId, target, button = 'left', clickCount = 1) {
-    let x, y;
+  async click(tabId: string, target: string | { x: number; y: number }, button = 'left', clickCount = 1): Promise<any> {
+    let x: number, y: number;
     if (typeof target === 'object' && target.x !== undefined && target.y !== undefined) {
       x = target.x;
       y = target.y;
@@ -317,7 +341,6 @@ export class WraveCdpEngine {
       throw new Error('Invalid target: specify {x, y} coordinates or CSS selector string');
     }
 
-    // Dispatch mouse click directly
     await this.sendCdpCommand(tabId, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved',
       x,
@@ -342,11 +365,11 @@ export class WraveCdpEngine {
     return { tabId, x, y, status: 'clicked' };
   }
 
-  async doubleClick(tabId, target) {
+  async doubleClick(tabId: string, target: string | { x: number; y: number }): Promise<any> {
     return this.click(tabId, target, 'left', 2);
   }
 
-  async typeText(tabId, selector, text, clearFirst = false) {
+  async typeText(tabId: string, selector: string, text: string, clearFirst = false): Promise<any> {
     await this.validateAction(tabId, 'type_text', { selector });
 
     if (selector) {
@@ -376,7 +399,7 @@ export class WraveCdpEngine {
     return { tabId, selector, textLength: text.length, status: 'typed' };
   }
 
-  async pressKey(tabId, key) {
+  async pressKey(tabId: string, key: string): Promise<any> {
     await this.sendCdpCommand(tabId, 'Input.dispatchKeyEvent', {
       type: 'rawKeyDown',
       key,
@@ -388,7 +411,7 @@ export class WraveCdpEngine {
     return { tabId, key, status: 'pressed' };
   }
 
-  async scrollPage(tabId, deltaX = 0, deltaY = 300) {
+  async scrollPage(tabId: string, deltaX = 0, deltaY = 300): Promise<any> {
     await this.sendCdpCommand(tabId, 'Input.dispatchMouseEvent', {
       type: 'mouseWheel',
       x: 300,
@@ -399,7 +422,7 @@ export class WraveCdpEngine {
     return { tabId, deltaX, deltaY, status: 'scrolled' };
   }
 
-  async executeScript(tabId, expression) {
+  async executeScript(tabId: string, expression: string): Promise<any> {
     await this.validateAction(tabId, 'execute_script', { expression });
     const res = await this.sendCdpCommand(tabId, 'Runtime.evaluate', {
       expression,
@@ -409,12 +432,12 @@ export class WraveCdpEngine {
     return res.result.value;
   }
 
-  async getCookies(tabId) {
+  async getCookies(tabId: string): Promise<any> {
     const res = await this.sendCdpCommand(tabId, 'Network.getCookies');
     return res.cookies || [];
   }
 
-  async printToPdf(tabId) {
+  async printToPdf(tabId: string): Promise<any> {
     const res = await this.sendCdpCommand(tabId, 'Page.printToPDF', {});
     return {
       mimeType: 'application/pdf',
@@ -422,8 +445,8 @@ export class WraveCdpEngine {
     };
   }
 
-  async getConsoleLogs(tabId) {
+  async getConsoleLogs(tabId: string): Promise<any[]> {
     if (!this.sessions.has(tabId)) return [];
-    return this.sessions.get(tabId).consoleLogs;
+    return this.sessions.get(tabId)!.consoleLogs;
   }
 }

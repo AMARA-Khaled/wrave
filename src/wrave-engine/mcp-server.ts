@@ -1,5 +1,5 @@
-/**
- * Wrave Model Context Protocol (MCP) Server
+﻿/**
+ * Wrave Model Context Protocol (MCP) Server (TypeScript)
  * Exposes Wrave browser automation to AI harnesses (Claude Code, Antigravity, Codex, OpenCode).
  * Supports SSE, Stdio, and HTTP POST JSON-RPC 2.0 with Bearer token authentication.
  * Includes Extension WebSocket bridge for fallback automation when CDP is not enabled.
@@ -8,25 +8,41 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { WebSocketServer } from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 import { WraveCdpEngine } from './cdp-engine.js';
+import {
+  McpServerOptions,
+  McpToolDefinition,
+  JsonRpcRequest,
+  JsonRpcResponse,
+  McpToolCallResult,
+  McpToolResultContent,
+} from './types.js';
 
 export class WraveMcpServer {
-  constructor(options = {}) {
+  public port: number;
+  public host: string;
+  public authToken: string;
+  public requireAuth: boolean;
+  public cdpEngine: WraveCdpEngine;
+  private sseSessions: Map<string, http.ServerResponse>;
+  private server: http.Server | null = null;
+  private wss: WebSocketServer | null = null;
+  public extensionSocket: WebSocket | null = null;
+  private pendingBridgeRequests: Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>;
+  private bridgeMessageId: number = 1;
+
+  constructor(options: McpServerOptions = {}) {
     this.port = options.port || 8282;
     this.host = options.host || '127.0.0.1';
     this.authToken = options.authToken || crypto.randomBytes(16).toString('hex');
     this.requireAuth = options.requireAuth ?? false;
     this.cdpEngine = new WraveCdpEngine(options.cdpOptions || {});
-    this.sseSessions = new Map(); // sessionId -> http.ServerResponse
-    this.server = null;
-    this.wss = null;
-    this.extensionSocket = null;
-    this.pendingBridgeRequests = new Map(); // id -> { resolve, reject }
-    this.bridgeMessageId = 1;
+    this.sseSessions = new Map<string, http.ServerResponse>();
+    this.pendingBridgeRequests = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>();
   }
 
-  getToolsDefinition() {
+  getToolsDefinition(): McpToolDefinition[] {
     return [
       {
         name: 'wrave_list_tabs',
@@ -43,7 +59,7 @@ export class WraveMcpServer {
           type: 'object',
           properties: {
             url: { type: 'string', description: 'URL to open' },
-            activate: { type: 'boolean', description: 'Whether to focus the tab immediately', default: true },
+            activate: { type: 'boolean', default: true, description: 'Bring tab to foreground' },
           },
           required: ['url'],
         },
@@ -84,7 +100,7 @@ export class WraveMcpServer {
       },
       {
         name: 'wrave_get_tab_state',
-        description: 'Get current title, url, window dimensions, and scroll position.',
+        description: 'Read the active tab state including title, URL, viewport dimensions, and scroll offset.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -95,19 +111,20 @@ export class WraveMcpServer {
       },
       {
         name: 'wrave_get_dom_tree',
-        description: 'Extract a clean, LLM-friendly DOM tree with geometry bounding boxes [x, y, w, h] for interactive elements.',
+        description: 'Extract clean, LLM-friendly DOM tree with bounding boxes [x, y, w, h] and interactive element metadata.',
         inputSchema: {
           type: 'object',
           properties: {
             tab_id: { type: 'string', description: 'The ID of the tab' },
-            max_depth: { type: 'number', default: 4, description: 'Maximum tree depth' },
+            max_depth: { type: 'number', default: 4, description: 'Max tree nesting depth' },
+            html: { type: 'boolean', default: false, description: 'Return full HTML if true' },
           },
           required: ['tab_id'],
         },
       },
       {
         name: 'wrave_get_accessibility_tree',
-        description: 'Extract the full accessibility tree (roles, labels, values) for the tab.',
+        description: 'Extract the full accessibility tree (AXTree) for semantic screen-reader level inspection.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -242,8 +259,8 @@ export class WraveMcpServer {
     ];
   }
 
-  async sendBridgeCommand(method, params = {}, timeoutMs = 8000) {
-    if (!this.extensionSocket || this.extensionSocket.readyState !== 1) {
+  async sendBridgeCommand(method: string, params: Record<string, any> = {}, timeoutMs = 8000): Promise<any> {
+    if (!this.extensionSocket || this.extensionSocket.readyState !== WebSocket.OPEN) {
       throw new Error('Extension bridge is not connected.');
     }
     const id = this.bridgeMessageId++;
@@ -258,11 +275,11 @@ export class WraveMcpServer {
         reject: (err) => { clearTimeout(timer); reject(err); },
       });
 
-      this.extensionSocket.send(JSON.stringify({ id, method, params }));
+      this.extensionSocket!.send(JSON.stringify({ id, method, params }));
     });
   }
 
-  async handleMcpToolCall(name, args, callerName = 'AI Harness') {
+  async handleMcpToolCall(name: string, args: Record<string, any> = {}, _callerName = 'AI Harness'): Promise<any> {
     const cdpReady = await this.cdpEngine.isCdpAvailable();
 
     // 1. Direct CDP Execution (Primary)
@@ -298,7 +315,7 @@ export class WraveMcpServer {
           };
         }
         case 'wrave_click': {
-          const target = args.selector || { x: args.x, y: args.y };
+          const target = (args.x !== undefined && args.y !== undefined) ? { x: args.x, y: args.y } : args.selector;
           return await this.cdpEngine.click(args.tab_id, target);
         }
         case 'wrave_double_click':
@@ -317,32 +334,30 @@ export class WraveMcpServer {
           return await this.cdpEngine.printToPdf(args.tab_id);
         case 'wrave_get_console_logs':
           return await this.cdpEngine.getConsoleLogs(args.tab_id);
-        default:
-          throw new Error(`Unknown tool: ${name}`);
       }
     }
 
-    // 2. Extension Bridge Fallback
-    if (this.extensionSocket && this.extensionSocket.readyState === 1) {
+    // 2. Extension Bridge Fallback (When CDP port 9222 is not active)
+    if (this.extensionSocket && this.extensionSocket.readyState === WebSocket.OPEN) {
       switch (name) {
         case 'wrave_list_tabs':
-          return await this.sendBridgeCommand('tabs_list');
+          return await this.sendBridgeCommand('tab_list');
         case 'wrave_open_tab':
-          return await this.sendBridgeCommand('tab_create', { url: args.url, active: args.activate !== false });
+          return await this.sendBridgeCommand('tab_open', { url: args.url, activate: args.activate !== false });
         case 'wrave_close_tab':
           return await this.sendBridgeCommand('tab_close', { tabId: args.tab_id });
         case 'wrave_focus_tab':
-          return await this.sendBridgeCommand('tab_activate', { tabId: args.tab_id });
+          return await this.sendBridgeCommand('tab_focus', { tabId: args.tab_id });
         case 'wrave_reload_tab':
-          return await this.sendBridgeCommand('tab_reload', { tabId: args.tab_id, ignore_cache: args.ignore_cache });
+          return await this.sendBridgeCommand('tab_reload', { tabId: args.tab_id, ignoreCache: args.ignore_cache });
         case 'wrave_get_tab_state':
           return await this.sendBridgeCommand('tab_get_state', { tabId: args.tab_id });
         case 'wrave_take_screenshot': {
-          const res = await this.sendBridgeCommand('page_screenshot', { tabId: args.tab_id });
+          const shot = await this.sendBridgeCommand('tab_screenshot', { tabId: args.tab_id, format: args.format || 'png' });
           return {
             _isImage: true,
-            mimeType: 'image/png',
-            data: res.dataUrl ? res.dataUrl.replace(/^data:image\/png;base64,/, '') : '',
+            mimeType: `image/${args.format || 'png'}`,
+            data: shot.dataBase64,
           };
         }
         case 'wrave_get_dom_tree':
@@ -367,12 +382,8 @@ export class WraveMcpServer {
     throw new Error('Brave is not connected. Either start Brave with --remote-debugging-port=9222 or open Brave with the Wrave Extension loaded.');
   }
 
-  async handleRpcMessage(msg, callerName = 'Client') {
-    if (!msg || typeof msg !== 'object') {
-      return { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } };
-    }
-
-    const { id, method, params } = msg;
+  async handleRpcMessage(msg: JsonRpcRequest, callerName = 'AI Harness'): Promise<JsonRpcResponse | null> {
+    const { id, method, params = {} } = msg;
 
     if (method === 'initialize') {
       return {
@@ -410,16 +421,17 @@ export class WraveMcpServer {
     }
 
     if (method === 'tools/call') {
-      const toolName = params?.name;
-      const toolArgs = params?.arguments || {};
+      const toolName = params.name as string;
+      const toolArgs = (params.arguments || {}) as Record<string, any>;
       try {
         const toolResult = await this.handleMcpToolCall(toolName, toolArgs, callerName);
-        let content = [];
+        const content: McpToolResultContent[] = [];
+
         if (toolResult && toolResult._isImage) {
           content.push({
             type: 'image',
             data: toolResult.data,
-            mimeType: toolResult.mimeType,
+            mimeType: toolResult.mimeType || 'image/png',
           });
         } else {
           content.push({
@@ -432,7 +444,7 @@ export class WraveMcpServer {
           id,
           result: { content, isError: false },
         };
-      } catch (err) {
+      } catch (err: any) {
         return {
           jsonrpc: '2.0',
           id,
@@ -451,10 +463,10 @@ export class WraveMcpServer {
     };
   }
 
-  start() {
+  start(): Promise<{ port: number; host: string; sseUrl: string; token: string }> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer(async (req, res) => {
-        const parsedUrl = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+        const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
 
         // CORS Headers
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -517,7 +529,7 @@ export class WraveMcpServer {
             version: '1.1.0',
             securityMode: this.cdpEngine?.securityMode || 'ask_validation',
             cdpConnected: cdpAvailable,
-            extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === 1),
+            extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === WebSocket.OPEN),
             tools: this.getToolsDefinition().map(t => t.name),
           }));
           return;
@@ -529,7 +541,7 @@ export class WraveMcpServer {
           req.on('data', (chunk) => (body += chunk));
           req.on('end', async () => {
             try {
-              const msg = JSON.parse(body);
+              const msg = JSON.parse(body) as JsonRpcRequest;
               const rpcRes = await this.handleRpcMessage(msg, 'HTTP Client');
               const sessionId = parsedUrl.searchParams.get('sessionId');
               const sseRes = sessionId
@@ -544,7 +556,7 @@ export class WraveMcpServer {
 
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify(rpcRes || { jsonrpc: '2.0', id: null, result: {} }));
-            } catch (err) {
+            } catch (err: any) {
               res.writeHead(400, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
                 jsonrpc: '2.0',
@@ -560,19 +572,18 @@ export class WraveMcpServer {
         res.end('Not found');
       });
 
-      // Setup WebSocketServer for Extension Bridge
       this.wss = new WebSocketServer({ noServer: true });
 
       this.server.on('upgrade', (req, socket, head) => {
-        const parsedUrl = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+        const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || this.host}`);
         if (parsedUrl.pathname === '/extension') {
-          this.wss.handleUpgrade(req, socket, head, (ws) => {
+          this.wss!.handleUpgrade(req, socket, head, (ws) => {
             this.extensionSocket = ws;
-            ws.on('message', (data) => {
+            ws.on('message', (data: any) => {
               try {
-                const parsed = JSON.parse(data);
+                const parsed = JSON.parse(data.toString());
                 if (parsed.id && this.pendingBridgeRequests.has(parsed.id)) {
-                  const { resolve, reject } = this.pendingBridgeRequests.get(parsed.id);
+                  const { resolve, reject } = this.pendingBridgeRequests.get(parsed.id)!;
                   this.pendingBridgeRequests.delete(parsed.id);
                   if (parsed.error) reject(new Error(parsed.error));
                   else resolve(parsed.result);
@@ -590,10 +601,10 @@ export class WraveMcpServer {
 
       this.server.listen(this.port, this.host, () => {
         resolve({
-          host: this.host,
           port: this.port,
-          token: this.authToken,
+          host: this.host,
           sseUrl: `http://${this.host}:${this.port}/mcp/sse`,
+          token: this.authToken,
         });
       });
 
@@ -601,86 +612,67 @@ export class WraveMcpServer {
     });
   }
 
-  async startBridgeOnly(port = 8282, host = '127.0.0.1') {
+  startBridgeOnly(port = 8282, host = '127.0.0.1'): Promise<boolean> {
     return new Promise((resolve) => {
-      try {
-        this.server = http.createServer(async (req, res) => {
-          const parsedUrl = new URL(req.url, `http://${req.headers.host || host}`);
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      this.server = http.createServer((req, res) => {
+        const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || host}`);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        if (parsedUrl.pathname === '/health') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'running', mode: 'stdio-bridge' }));
+          return;
+        }
+        res.writeHead(404);
+        res.end('Not found');
+      });
 
-          if (req.method === 'OPTIONS') {
-            res.writeHead(204);
-            res.end();
-            return;
-          }
+      this.wss = new WebSocketServer({ noServer: true });
 
-          if (req.method === 'GET' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/health')) {
-            const cdpAvailable = await this.cdpEngine.isCdpAvailable();
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-              status: 'running',
-              name: 'wrave-mcp-server',
-              version: '1.1.0',
-              mode: 'stdio-bridge',
-              cdpConnected: cdpAvailable,
-              extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === 1),
-            }));
-            return;
-          }
-
-          res.writeHead(404);
-          res.end('Not found');
-        });
-
-        this.wss = new WebSocketServer({ noServer: true });
-
-        this.server.on('upgrade', (req, socket, head) => {
-          const parsedUrl = new URL(req.url, `http://${req.headers.host || host}`);
-          if (parsedUrl.pathname === '/extension') {
-            this.wss.handleUpgrade(req, socket, head, (ws) => {
-              this.extensionSocket = ws;
-              ws.on('message', (data) => {
-                try {
-                  const parsed = JSON.parse(data);
-                  if (parsed.id && this.pendingBridgeRequests.has(parsed.id)) {
-                    const { resolve, reject } = this.pendingBridgeRequests.get(parsed.id);
-                    this.pendingBridgeRequests.delete(parsed.id);
-                    if (parsed.error) reject(new Error(parsed.error));
-                    else resolve(parsed.result);
-                  }
-                } catch {}
-              });
-              ws.on('close', () => {
-                if (this.extensionSocket === ws) this.extensionSocket = null;
-              });
+      this.server.on('upgrade', (req, socket, head) => {
+        const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || host}`);
+        if (parsedUrl.pathname === '/extension') {
+          this.wss!.handleUpgrade(req, socket, head, (ws) => {
+            this.extensionSocket = ws;
+            ws.on('message', (data: any) => {
+              try {
+                const parsed = JSON.parse(data.toString());
+                if (parsed.id && this.pendingBridgeRequests.has(parsed.id)) {
+                  const { resolve, reject } = this.pendingBridgeRequests.get(parsed.id)!;
+                  this.pendingBridgeRequests.delete(parsed.id);
+                  if (parsed.error) reject(new Error(parsed.error));
+                  else resolve(parsed.result);
+                }
+              } catch {}
             });
-          } else {
-            socket.destroy();
-          }
-        });
+            ws.on('close', () => {
+              if (this.extensionSocket === ws) this.extensionSocket = null;
+            });
+          });
+        } else {
+          socket.destroy();
+        }
+      });
 
-        this.server.on('error', () => {
-          // If port is already in use by a running server, continue gracefully
-          resolve(false);
-        });
-
-        this.server.listen(port, host, () => {
-          resolve(true);
-        });
-      } catch {
+      this.server.on('error', () => {
         resolve(false);
-      }
+      });
+
+      this.server.listen(port, host, () => {
+        resolve(true);
+      });
     });
   }
 
-  stop() {
+  stop(): void {
     if (this.wss) {
       try { this.wss.close(); } catch {}
     }
     if (this.server) {
       try { this.server.close(); } catch {}
     }
+    for (const res of this.sseSessions.values()) {
+      try { res.end(); } catch {}
+    }
+    this.sseSessions.clear();
   }
 }

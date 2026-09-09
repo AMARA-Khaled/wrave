@@ -1,11 +1,11 @@
-/**
- * Automated Verification Suite for Wrave MCP & CDP Automation Engine
+﻿/**
+ * Automated Verification Suite for Wrave MCP & CDP Automation Engine (TypeScript)
  */
 
 import assert from 'node:assert';
 import { WraveMcpServer } from '../mcp-server.js';
 
-async function runTestSuite() {
+async function runTestSuite(): Promise<void> {
   console.log('🧪 Starting Wrave MCP Automated Test Suite...\n');
 
   const testPort = 8299;
@@ -28,9 +28,9 @@ async function runTestSuite() {
 
   try {
     // 1. Test /health endpoint
-    const health = await fetch(`http://127.0.0.1:${testPort}/health`, {
+    const health = (await fetch(`http://127.0.0.1:${testPort}/health`, {
       headers: { Authorization: `Bearer ${testToken}` },
-    }).then((r) => r.json());
+    }).then((r) => r.json())) as any;
     assert.strictEqual(health.status, 'running');
     assert.strictEqual(health.securityMode, 'ask_validation');
     console.log('[PASS] /health endpoint verified');
@@ -45,7 +45,7 @@ async function runTestSuite() {
     console.log('[PASS] Bearer token security enforcement verified (401 on unauthorized)');
 
     // 3. Test MCP initialize handshake
-    const initRes = await fetch(`http://127.0.0.1:${testPort}/mcp`, {
+    const initRes = (await fetch(`http://127.0.0.1:${testPort}/mcp`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -61,25 +61,25 @@ async function runTestSuite() {
           clientInfo: { name: 'antigravity-test', version: '1.0' },
         },
       }),
-    }).then((r) => r.json());
+    }).then((r) => r.json())) as any;
 
     assert.strictEqual(initRes.result.serverInfo.name, 'wrave-mcp-server');
     assert.strictEqual(initRes.result.protocolVersion, '2024-11-05');
     console.log('[PASS] MCP initialize protocol handshake verified');
 
     // 4. Test tools/list
-    const toolsRes = await fetch(`http://127.0.0.1:${testPort}/mcp`, {
+    const toolsRes = (await fetch(`http://127.0.0.1:${testPort}/mcp`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${testToken}`,
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'tools/list' }),
-    }).then((r) => r.json());
+    }).then((r) => r.json())) as any;
 
     assert(Array.isArray(toolsRes.result.tools));
     assert(toolsRes.result.tools.length >= 10, 'Expected at least 10 tools');
-    const toolNames = new Set(toolsRes.result.tools.map((t) => t.name));
+    const toolNames = new Set(toolsRes.result.tools.map((t: any) => t.name));
     assert(toolNames.has('wrave_list_tabs'));
     assert(toolNames.has('wrave_open_tab'));
     assert(toolNames.has('wrave_close_tab'));
@@ -104,7 +104,7 @@ async function runTestSuite() {
     assert.strictEqual(sseResponse.status, 200);
     assert.strictEqual(sseResponse.headers.get('content-type'), 'text/event-stream');
 
-    const reader = sseResponse.body.getReader();
+    const reader = sseResponse.body!.getReader();
     const { value: chunkVal } = await reader.read();
     const chunkStr = new TextDecoder().decode(chunkVal);
     assert(chunkStr.includes('event: endpoint'), 'Expected endpoint event in SSE');
