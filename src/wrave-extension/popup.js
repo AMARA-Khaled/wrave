@@ -1,30 +1,18 @@
 document.addEventListener('DOMContentLoaded', async () => {
-  const activeTabTitle = document.getElementById('activeTabTitle');
-  const activeTabUrl = document.getElementById('activeTabUrl');
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const copyBtn = document.getElementById('copyBtn');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const reconnectBtn = document.getElementById('reconnectBtn');
   const mcpCode = document.getElementById('mcpCode');
   const openSettingsBtn = document.getElementById('openSettingsBtn');
   const mcpPortVal = document.getElementById('mcpPortVal');
   const cdpPortVal = document.getElementById('cdpPortVal');
   const bridgeVal = document.getElementById('bridgeVal');
 
-  // 1. Get active tab
-  try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tabs && tabs[0]) {
-      activeTabTitle.textContent = tabs[0].title || 'Untitled Tab';
-      activeTabUrl.textContent = tabs[0].url || 'about:blank';
-    }
-  } catch (err) {
-    activeTabTitle.textContent = 'Active Tab';
-    activeTabUrl.textContent = 'Ready';
-  }
-
-  // 2. Load stored settings (or defaults)
   let mcpPort = 8282;
   let cdpPort = 9222;
+
   try {
     const data = await chrome.storage.local.get(['mcpPort', 'cdpPort']);
     if (data.mcpPort) mcpPort = data.mcpPort;
@@ -33,10 +21,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   mcpPortVal.textContent = `:${mcpPort}`;
   cdpPortVal.textContent = `:${cdpPort}`;
-  mcpCode.textContent = `claude mcp add wrave -- http://127.0.0.1:${mcpPort}/mcp/sse`;
 
-  // 3. Check live status
   async function checkStatus() {
+    statusDot.className = 'status-dot';
+    statusText.textContent = 'Checking';
+    bridgeVal.textContent = 'Testing...';
+
     let mcpOnline = false;
     let cdpOnline = false;
 
@@ -53,27 +43,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch {}
 
     if (mcpOnline) {
-      statusDot.className = 'dot online';
-      statusText.textContent = 'MCP Online';
-      bridgeVal.textContent = cdpOnline ? 'CDP + WS' : 'WebSocket';
+      statusDot.className = 'status-dot online';
+      statusText.textContent = 'Online';
+      bridgeVal.textContent = cdpOnline ? 'CDP + WS Bridge' : 'WebSocket Bridge';
     } else {
-      statusDot.className = 'dot offline';
-      statusText.textContent = 'MCP Offline';
-      bridgeVal.textContent = cdpOnline ? 'CDP Ready' : 'Standby';
+      statusDot.className = 'status-dot offline';
+      statusText.textContent = 'Offline';
+      bridgeVal.textContent = cdpOnline ? 'CDP Ready (Port 9222)' : 'Disconnected';
     }
   }
 
   checkStatus();
 
-  // 4. Copy snippet
+  refreshBtn.addEventListener('click', () => {
+    checkStatus();
+  });
+
+  reconnectBtn.addEventListener('click', async () => {
+    reconnectBtn.textContent = 'Reconnecting...';
+    try {
+      await chrome.runtime.sendMessage({ action: 'reconnect' });
+    } catch {}
+    setTimeout(async () => {
+      await checkStatus();
+      reconnectBtn.textContent = 'Reconnect';
+    }, 1000);
+  });
+
   copyBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(mcpCode.textContent).then(() => {
-      copyBtn.textContent = '✓ Copied!';
-      setTimeout(() => copyBtn.textContent = '📋 Copy', 1800);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => copyBtn.textContent = 'Copy', 1500);
     });
   });
 
-  // 5. Open Settings Page
   openSettingsBtn.addEventListener('click', () => {
     if (chrome.runtime.openOptionsPage) {
       chrome.runtime.openOptionsPage();

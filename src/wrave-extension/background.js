@@ -100,6 +100,21 @@ function scheduleReconnect() {
 // Keep connection alive
 initBridge();
 
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'reconnect') {
+    if (bridgeSocket) {
+      try { bridgeSocket.close(); } catch {}
+      bridgeSocket = null;
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    initBridge().then(() => sendResponse({ status: 'initiated' }));
+    return true;
+  }
+});
+
 // 3. Dispatch and execute commands from MCP Companion
 async function handleCompanionCommand(cmd) {
   const { id, method, params } = cmd;
@@ -194,6 +209,65 @@ async function handleCompanionCommand(cmd) {
           args: [params.script]
         });
         reply(results && results[0] ? results[0].result : null);
+        break;
+      }
+
+      case 'tab_reload': {
+        const tabId = parseInt(params.tabId, 10);
+        await chrome.tabs.reload(tabId, { bypassCache: !!params.ignore_cache });
+        reply({ success: true, tabId });
+        break;
+      }
+
+      case 'tab_get_state': {
+        const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
+        const tab = await chrome.tabs.get(tabId);
+        reply({
+          id: tab.id,
+          title: tab.title,
+          url: tab.url,
+          active: tab.active,
+          status: tab.status,
+          width: tab.width,
+          height: tab.height
+        });
+        break;
+      }
+
+      case 'page_click': {
+        const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return { success: false, error: 'Element not found: ' + sel };
+            el.scrollIntoView({ block: 'center' });
+            el.click();
+            return { success: true };
+          },
+          args: [params.selector]
+        });
+        reply(results && results[0] ? results[0].result : { success: false });
+        break;
+      }
+
+      case 'page_type_text': {
+        const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (sel, text, clear) => {
+            const el = document.querySelector(sel);
+            if (!el) return { success: false, error: 'Element not found: ' + sel };
+            el.focus();
+            if (clear) el.value = '';
+            el.value += text;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return { success: true, value: el.value };
+          },
+          args: [params.selector, params.text, params.clear_first]
+        });
+        reply(results && results[0] ? results[0].result : { success: false });
         break;
       }
 

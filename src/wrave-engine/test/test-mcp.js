@@ -15,6 +15,7 @@ async function runTestSuite() {
     port: testPort,
     host: '127.0.0.1',
     authToken: testToken,
+    requireAuth: true,
     cdpOptions: {
       host: '127.0.0.1',
       port: 9222,
@@ -27,7 +28,9 @@ async function runTestSuite() {
 
   try {
     // 1. Test /health endpoint
-    const health = await fetch(`http://127.0.0.1:${testPort}/health`).then((r) => r.json());
+    const health = await fetch(`http://127.0.0.1:${testPort}/health`, {
+      headers: { Authorization: `Bearer ${testToken}` },
+    }).then((r) => r.json());
     assert.strictEqual(health.status, 'running');
     assert.strictEqual(health.securityMode, 'ask_validation');
     console.log('[PASS] /health endpoint verified');
@@ -55,12 +58,12 @@ async function runTestSuite() {
         params: {
           protocolVersion: '2024-11-05',
           capabilities: {},
-          clientInfo: { name: 'claude-code-test', version: '1.0' },
+          clientInfo: { name: 'antigravity-test', version: '1.0' },
         },
       }),
     }).then((r) => r.json());
 
-    assert.strictEqual(initRes.result.serverInfo.name, 'wrave-browser-mcp');
+    assert.strictEqual(initRes.result.serverInfo.name, 'wrave-mcp-server');
     assert.strictEqual(initRes.result.protocolVersion, '2024-11-05');
     console.log('[PASS] MCP initialize protocol handshake verified');
 
@@ -75,52 +78,29 @@ async function runTestSuite() {
     }).then((r) => r.json());
 
     assert(Array.isArray(toolsRes.result.tools));
-    assert(toolsRes.result.tools.length >= 19, 'Expected at least 19 tools');
+    assert(toolsRes.result.tools.length >= 10, 'Expected at least 10 tools');
     const toolNames = new Set(toolsRes.result.tools.map((t) => t.name));
     assert(toolNames.has('wrave_list_tabs'));
     assert(toolNames.has('wrave_open_tab'));
-    assert(toolNames.has('wrave_move_cursor'));
+    assert(toolNames.has('wrave_close_tab'));
+    assert(toolNames.has('wrave_focus_tab'));
+    assert(toolNames.has('wrave_reload_tab'));
+    assert(toolNames.has('wrave_get_tab_state'));
     assert(toolNames.has('wrave_click'));
     assert(toolNames.has('wrave_type_text'));
-    assert(toolNames.has('wrave_teleport_to_ai_cursor'));
     assert(toolNames.has('wrave_take_screenshot'));
     assert(toolNames.has('wrave_get_dom_tree'));
     assert(toolNames.has('wrave_get_accessibility_tree'));
-    assert(toolNames.has('wrave_set_security_mode'));
+    assert(toolNames.has('wrave_execute_script'));
+    assert(toolNames.has('wrave_get_cookies'));
     console.log(`[PASS] tools/list returned ${toolsRes.result.tools.length} browser automation primitives`);
 
-    // 5. Test tool execution (wrave_set_security_mode)
-    const setSecRes = await fetch(`http://127.0.0.1:${testPort}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${testToken}`,
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 12,
-        method: 'tools/call',
-        params: {
-          name: 'wrave_set_security_mode',
-          arguments: { mode: 'full_access' },
-        },
-      }),
-    }).then((r) => r.json());
-
-    const contentText = JSON.parse(setSecRes.result.content[0].text);
-    assert.strictEqual(contentText.status, 'updated');
-    assert.strictEqual(contentText.mode, 'full_access');
-    assert.strictEqual(server.cdpEngine.securityMode, 'full_access');
-    console.log('[PASS] wrave_set_security_mode tool execution verified');
-
-    // 6. Test SSE stream handshake
+    // 5. Test SSE stream handshake and bidirectional message routing
     const controller = new AbortController();
-    const ssePromise = fetch(`http://127.0.0.1:${testPort}/mcp/sse`, {
-      headers: { Authorization: `Bearer ${testToken}` },
+    const sseResponse = await fetch(`http://127.0.0.1:${testPort}/mcp/sse?token=${testToken}`, {
       signal: controller.signal,
     });
 
-    const sseResponse = await ssePromise;
     assert.strictEqual(sseResponse.status, 200);
     assert.strictEqual(sseResponse.headers.get('content-type'), 'text/event-stream');
 
@@ -128,8 +108,28 @@ async function runTestSuite() {
     const { value: chunkVal } = await reader.read();
     const chunkStr = new TextDecoder().decode(chunkVal);
     assert(chunkStr.includes('event: endpoint'), 'Expected endpoint event in SSE');
-    assert(chunkStr.includes('/mcp/message?sessionId='), 'Expected sessionId in endpoint event');
+    assert(chunkStr.includes('sessionId='), 'Expected sessionId in endpoint event');
     console.log('[PASS] MCP Server-Sent Events (SSE) stream handshake verified');
+
+    // Extract sessionId
+    const sessionMatch = chunkStr.match(/sessionId=([a-f0-9]+)/);
+    assert(sessionMatch && sessionMatch[1], 'Could not extract sessionId');
+    const sessionId = sessionMatch[1];
+
+    // Send JSON-RPC message over POST
+    const postRes = await fetch(`http://127.0.0.1:${testPort}/mcp/message?sessionId=${sessionId}&token=${testToken}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 42, method: 'tools/list' }),
+    });
+    assert.strictEqual(postRes.status, 202);
+
+    // Read response from SSE stream
+    const { value: respChunk } = await reader.read();
+    const respStr = new TextDecoder().decode(respChunk);
+    assert(respStr.includes('event: message'), 'Expected message event in SSE');
+    assert(respStr.includes('"id":42') || respStr.includes('"id": 42'), 'Expected RPC response id 42 on SSE stream');
+    console.log('[PASS] MCP bidirectional SSE request/response cycle verified');
 
     controller.abort(); // Close stream
     console.log('\n🎉 ALL WRAVE MCP INTEGRATION TESTS PASSED SUCCESSFULLY!\n');

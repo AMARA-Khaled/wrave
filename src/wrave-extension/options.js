@@ -49,16 +49,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   allowJsExecInput.checked = stored.allowJsExec;
   allowCookiesInput.checked = stored.allowCookies;
 
+  const antigravityStdioConfig = document.getElementById('antigravityStdioConfig');
+  const mcpSseConfig = document.getElementById('mcpSseConfig');
+
   function updateSnippets() {
     const port = mcpPortInput.value || 8282;
-    claudeHttpCmd.textContent = `claude mcp add wrave -- http://127.0.0.1:${port}/mcp/sse`;
-    mcpJsonConfig.textContent = JSON.stringify({
-      mcpServers: {
-        wrave: {
-          url: `http://127.0.0.1:${port}/mcp/sse`
+    if (mcpSseConfig) {
+      mcpSseConfig.textContent = JSON.stringify({
+        mcpServers: {
+          wrave: {
+            serverUrl: `http://127.0.0.1:${port}/mcp/sse`
+          }
         }
-      }
-    }, null, 2);
+      }, null, 2);
+    }
   }
   updateSnippets();
 

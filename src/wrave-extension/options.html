@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Wrave MCP - Browser Settings</title>
+  <title>Wrave MCP Server - Settings</title>
   <link rel="icon" type="image/png" href="icons/product_logo_32.png">
   <link rel="stylesheet" href="options.css">
 </head>
@@ -13,22 +13,22 @@
       <div class="sidebar-header">
         <img src="icons/product_logo_32.png" alt="Wrave" class="logo">
         <div>
-          <h2>WRAVE</h2>
-          <span>MCP Settings</span>
+          <h2>Wrave</h2>
+          <span>MCP Server</span>
         </div>
       </div>
       <nav class="sidebar-nav">
-        <button class="nav-item active" data-tab="general">⚙️ General & Connection</button>
-        <button class="nav-item" data-tab="security">🛡️ Security & Permissions</button>
-        <button class="nav-item" data-tab="integration">🤖 AI Client Setup</button>
-        <button class="nav-item" data-tab="console">🧪 Diagnostic Console</button>
+        <button class="nav-item active" data-tab="general">General & Connection</button>
+        <button class="nav-item" data-tab="security">Security & Permissions</button>
+        <button class="nav-item" data-tab="integration">Client Setup</button>
+        <button class="nav-item" data-tab="console">Diagnostics</button>
       </nav>
       <div class="sidebar-footer">
         <div class="status-indicator">
           <span class="status-dot" id="sidebarStatusDot"></span>
-          <span id="sidebarStatusText">Checking daemon...</span>
+          <span id="sidebarStatusText">Checking server...</span>
         </div>
-        <div class="version">Wrave v1.1.0</div>
+        <div class="version">Wrave MCP v1.1.0</div>
       </div>
     </aside>
 
@@ -37,22 +37,22 @@
       <section class="tab-pane active" id="pane-general">
         <div class="pane-header">
           <h1>General & Connection</h1>
-          <p>Configure ports and connection endpoints for external AI agents.</p>
+          <p>Configure ports and local endpoints for connected AI assistants.</p>
         </div>
 
         <div class="settings-group">
           <div class="setting-row">
             <div class="setting-info">
-              <label for="mcpPort">MCP Server Port</label>
-              <p>Port for the local HTTP/SSE Model Context Protocol gateway.</p>
+              <label for="mcpPort">MCP Bridge Port</label>
+              <p>Port for the local HTTP/WebSocket Model Context Protocol server.</p>
             </div>
             <input type="number" id="mcpPort" value="8282" min="1024" max="65535">
           </div>
 
           <div class="setting-row">
             <div class="setting-info">
-              <label for="cdpPort">Chromium CDP Port</label>
-              <p>Chrome DevTools Protocol port for zero-latency direct automation.</p>
+              <label for="cdpPort">Chromium DevTools Port (Optional)</label>
+              <p>CDP port when Brave is launched with --remote-debugging-port.</p>
             </div>
             <input type="number" id="cdpPort" value="9222" min="1024" max="65535">
           </div>
@@ -60,7 +60,7 @@
           <div class="setting-row">
             <div class="setting-info">
               <label for="bearerToken">Bearer Token (Optional)</label>
-              <p>Require authentication header for incoming HTTP requests.</p>
+              <p>Optional secret token required for HTTP requests.</p>
             </div>
             <input type="text" id="bearerToken" placeholder="Leave blank for local-only trust">
           </div>
@@ -75,15 +75,15 @@
       <!-- TAB 2: Security & Permissions -->
       <section class="tab-pane" id="pane-security">
         <div class="pane-header">
-          <h1>Security & Permission Gate</h1>
-          <p>Control what actions AI agents are authorized to perform in your browser.</p>
+          <h1>Security & Permissions</h1>
+          <p>Control what operations connected assistants are allowed to execute.</p>
         </div>
 
         <div class="settings-group">
           <div class="setting-row toggle-row">
             <div class="setting-info">
               <label for="gatePasswords">Password & Sensitive Form Gate</label>
-              <p>Block AI from auto-submitting password and credit card fields without user prompt.</p>
+              <p>Prevent automated typing into password and payment fields.</p>
             </div>
             <label class="switch">
               <input type="checkbox" id="gatePasswords" checked>
@@ -93,8 +93,8 @@
 
           <div class="setting-row toggle-row">
             <div class="setting-info">
-              <label for="allowJsExec">Arbitrary JavaScript Execution (`page_execute_js`)</label>
-              <p>Allow connected AI agents to evaluate JavaScript in the page context.</p>
+              <label for="allowJsExec">JavaScript Execution (wrave_execute_script)</label>
+              <p>Allow connected clients to evaluate JavaScript in the tab context.</p>
             </div>
             <label class="switch">
               <input type="checkbox" id="allowJsExec" checked>
@@ -104,8 +104,8 @@
 
           <div class="setting-row toggle-row">
             <div class="setting-info">
-              <label for="allowCookies">Cookie & Storage Access</label>
-              <p>Permit AI agents to read cookies for authenticated session inspection.</p>
+              <label for="allowCookies">Cookie & Storage Inspection</label>
+              <p>Permit reading cookies for authenticated session inspection.</p>
             </div>
             <label class="switch">
               <input type="checkbox" id="allowCookies" checked>
@@ -119,62 +119,70 @@
         </div>
       </section>
 
-      <!-- TAB 3: AI Client Setup -->
+      <!-- TAB 3: Client Setup -->
       <section class="tab-pane" id="pane-integration">
         <div class="pane-header">
-          <h1>AI Client Integration</h1>
-          <p>Copy configuration snippets directly into your favorite AI harnesses.</p>
+          <h1>Client Setup</h1>
+          <p>Add Wrave MCP server to your AI assistants and coding tools.</p>
         </div>
 
         <div class="integration-card">
           <div class="integration-header">
-            <h3>Claude Code (Stdio Mode - Recommended)</h3>
-            <button class="btn-copy" data-target="claudeStdioCmd">📋 Copy Command</button>
+            <h3>Antigravity (Stdio Mode - Recommended)</h3>
+            <button class="btn-copy" data-target="antigravityStdioConfig">Copy JSON</button>
           </div>
-          <p>Runs on demand with zero background server needed:</p>
-          <pre><code id="claudeStdioCmd">claude mcp add wrave -- node "C:\Users\walid\Desktop\weed\wrave\src\wrave-engine\cli.js" --stdio</code></pre>
-        </div>
-
-        <div class="integration-card">
-          <div class="integration-header">
-            <h3>Claude Code (HTTP/SSE Mode)</h3>
-            <button class="btn-copy" data-target="claudeHttpCmd">📋 Copy Command</button>
-          </div>
-          <p>Connect to running background daemon:</p>
-          <pre><code id="claudeHttpCmd">claude mcp add wrave -- http://127.0.0.1:8282/mcp/sse</code></pre>
-        </div>
-
-        <div class="integration-card">
-          <div class="integration-header">
-            <h3>Antigravity / Cursor / Windsurf (`mcpServers` JSON)</h3>
-            <button class="btn-copy" data-target="mcpJsonConfig">📋 Copy JSON</button>
-          </div>
-          <pre><code id="mcpJsonConfig">{
+          <p>In <code>~/.gemini/config/mcp_config.json</code> (runs automatically on startup):</p>
+          <pre><code id="antigravityStdioConfig">{
   "mcpServers": {
     "wrave": {
-      "url": "http://127.0.0.1:8282/mcp/sse"
+      "command": "node",
+      "args": ["C:\\Users\\walid\\Desktop\\weed\\wrave\\src\\wrave-engine\\cli.js", "--stdio"]
     }
   }
 }</code></pre>
+        </div>
+
+        <div class="integration-card">
+          <div class="integration-header">
+            <h3>Antigravity / Cursor / Windsurf (SSE Mode)</h3>
+            <button class="btn-copy" data-target="mcpSseConfig">Copy JSON</button>
+          </div>
+          <p>Requires daemon running via <code>node cli.js --server --port 8282</code>:</p>
+          <pre><code id="mcpSseConfig">{
+  "mcpServers": {
+    "wrave": {
+      "serverUrl": "http://127.0.0.1:8282/mcp/sse"
+    }
+  }
+}</code></pre>
+        </div>
+
+        <div class="integration-card">
+          <div class="integration-header">
+            <h3>Claude Code CLI</h3>
+            <button class="btn-copy" data-target="claudeStdioCmd">Copy Command</button>
+          </div>
+          <p>Run once in your terminal:</p>
+          <pre><code id="claudeStdioCmd">claude mcp add wrave -- node "C:\Users\walid\Desktop\weed\wrave\src\wrave-engine\cli.js" --stdio</code></pre>
         </div>
       </section>
 
       <!-- TAB 4: Diagnostic Console -->
       <section class="tab-pane" id="pane-console">
         <div class="pane-header">
-          <h1>Diagnostic & Tool Test Console</h1>
-          <p>Inspect active browser tabs and verify MCP tool execution.</p>
+          <h1>Diagnostics</h1>
+          <p>Inspect active browser tabs and verify MCP tool responses.</p>
         </div>
 
         <div class="console-actions">
-          <button class="btn secondary" id="btnListTabs">📋 List Open Tabs</button>
-          <button class="btn secondary" id="btnCaptureScreen">📸 Capture Visible Tab</button>
-          <button class="btn secondary" id="btnCheckHealth">💓 Ping Daemon (:8282)</button>
+          <button class="btn secondary" id="btnListTabs">List Open Tabs</button>
+          <button class="btn secondary" id="btnCaptureScreen">Capture Viewport</button>
+          <button class="btn secondary" id="btnCheckHealth">Ping Server (:8282)</button>
         </div>
 
         <div class="console-output">
-          <div class="output-header">Live Output Log</div>
-          <pre id="consoleOutput">Click a diagnostic action above to test browser communication.</pre>
+          <div class="output-header">Diagnostic Output</div>
+          <pre id="consoleOutput">Click a diagnostic action above to verify browser communication.</pre>
         </div>
       </section>
     </main>

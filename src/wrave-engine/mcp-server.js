@@ -16,6 +16,7 @@ export class WraveMcpServer {
     this.port = options.port || 8282;
     this.host = options.host || '127.0.0.1';
     this.authToken = options.authToken || crypto.randomBytes(16).toString('hex');
+    this.requireAuth = options.requireAuth ?? false;
     this.cdpEngine = new WraveCdpEngine(options.cdpOptions || {});
     this.sseSessions = new Map(); // sessionId -> http.ServerResponse
     this.server = null;
@@ -332,6 +333,10 @@ export class WraveMcpServer {
           return await this.sendBridgeCommand('tab_close', { tabId: args.tab_id });
         case 'wrave_focus_tab':
           return await this.sendBridgeCommand('tab_activate', { tabId: args.tab_id });
+        case 'wrave_reload_tab':
+          return await this.sendBridgeCommand('tab_reload', { tabId: args.tab_id, ignore_cache: args.ignore_cache });
+        case 'wrave_get_tab_state':
+          return await this.sendBridgeCommand('tab_get_state', { tabId: args.tab_id });
         case 'wrave_take_screenshot': {
           const res = await this.sendBridgeCommand('page_screenshot', { tabId: args.tab_id });
           return {
@@ -342,6 +347,10 @@ export class WraveMcpServer {
         }
         case 'wrave_get_dom_tree':
           return await this.sendBridgeCommand('page_get_dom', { tabId: args.tab_id, html: false });
+        case 'wrave_click':
+          return await this.sendBridgeCommand('page_click', { tabId: args.tab_id, selector: args.selector, x: args.x, y: args.y });
+        case 'wrave_type_text':
+          return await this.sendBridgeCommand('page_type_text', { tabId: args.tab_id, selector: args.selector, text: args.text, clear_first: args.clear_first });
         case 'wrave_execute_script':
           return await this.sendBridgeCommand('page_execute_js', { tabId: args.tab_id, script: args.script });
         case 'wrave_get_cookies':
@@ -454,14 +463,27 @@ export class WraveMcpServer {
           return;
         }
 
-        // Health / Metadata Endpoint
-        if (req.method === 'GET' && parsedUrl.pathname === '/mcp') {
+        // Token authentication if requireAuth is enabled
+        if (this.requireAuth) {
+          const authHeader = req.headers.authorization || '';
+          const queryToken = parsedUrl.searchParams.get('token');
+          const token = authHeader.replace(/^Bearer\s+/i, '') || queryToken;
+          if (token !== this.authToken) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Unauthorized: Invalid or missing token' }));
+            return;
+          }
+        }
+
+        // Health / Diagnostic Endpoint
+        if (req.method === 'GET' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/health')) {
           const cdpAvailable = await this.cdpEngine.isCdpAvailable();
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
-            status: 'ok',
-            name: 'wrave-mcp-gateway',
+            status: 'running',
+            name: 'wrave-mcp-server',
             version: '1.1.0',
+            securityMode: this.cdpEngine?.securityMode || 'ask_validation',
             cdpConnected: cdpAvailable,
             extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === 1),
             tools: this.getToolsDefinition().map(t => t.name),
@@ -469,33 +491,57 @@ export class WraveMcpServer {
           return;
         }
 
-        // SSE Endpoint
+        // SSE Endpoint (MCP Specification)
         if (req.method === 'GET' && parsedUrl.pathname === '/mcp/sse') {
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
           });
+
           const sessionId = crypto.randomBytes(8).toString('hex');
           this.sseSessions.set(sessionId, res);
-          res.write(`event: endpoint\ndata: /mcp?sessionId=${sessionId}\n\n`);
+
+          // Inform MCP client of message endpoint
+          res.write(`event: endpoint\ndata: /mcp/message?sessionId=${sessionId}\n\n`);
+
+          const heartbeat = setInterval(() => {
+            try { res.write(': ping\n\n'); } catch {}
+          }, 15000);
 
           req.on('close', () => {
+            clearInterval(heartbeat);
             this.sseSessions.delete(sessionId);
           });
           return;
         }
 
-        // HTTP JSON-RPC Endpoint
-        if (req.method === 'POST' && parsedUrl.pathname === '/mcp') {
+        // HTTP JSON-RPC Endpoint (Supports both direct POST and SSE message routing)
+        if (req.method === 'POST' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/mcp/message')) {
           let body = '';
           req.on('data', (chunk) => (body += chunk));
           req.on('end', async () => {
             try {
               const msg = JSON.parse(body);
               const rpcRes = await this.handleRpcMessage(msg, 'HTTP Client');
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify(rpcRes));
+              const sessionId = parsedUrl.searchParams.get('sessionId');
+              const sseRes = sessionId
+                ? this.sseSessions.get(sessionId)
+                : (this.sseSessions.size === 1 ? Array.from(this.sseSessions.values())[0] : null);
+
+              if (sseRes) {
+                // Return response over SSE stream per MCP specification
+                if (rpcRes) {
+                  sseRes.write(`event: message\ndata: ${JSON.stringify(rpcRes)}\n\n`);
+                }
+                res.writeHead(202, { 'Content-Type': 'text/plain' });
+                res.end('Accepted');
+              } else {
+                // Direct POST response
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(rpcRes));
+              }
             } catch (err) {
               res.writeHead(400, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
@@ -553,12 +599,86 @@ export class WraveMcpServer {
     });
   }
 
+  async startBridgeOnly(port = 8282, host = '127.0.0.1') {
+    return new Promise((resolve) => {
+      try {
+        this.server = http.createServer(async (req, res) => {
+          const parsedUrl = new URL(req.url, `http://${req.headers.host || host}`);
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+          if (req.method === 'OPTIONS') {
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+
+          if (req.method === 'GET' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/health')) {
+            const cdpAvailable = await this.cdpEngine.isCdpAvailable();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              status: 'running',
+              name: 'wrave-mcp-server',
+              version: '1.1.0',
+              mode: 'stdio-bridge',
+              cdpConnected: cdpAvailable,
+              extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === 1),
+            }));
+            return;
+          }
+
+          res.writeHead(404);
+          res.end('Not found');
+        });
+
+        this.wss = new WebSocketServer({ noServer: true });
+
+        this.server.on('upgrade', (req, socket, head) => {
+          const parsedUrl = new URL(req.url, `http://${req.headers.host || host}`);
+          if (parsedUrl.pathname === '/extension') {
+            this.wss.handleUpgrade(req, socket, head, (ws) => {
+              this.extensionSocket = ws;
+              ws.on('message', (data) => {
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.id && this.pendingBridgeRequests.has(parsed.id)) {
+                    const { resolve, reject } = this.pendingBridgeRequests.get(parsed.id);
+                    this.pendingBridgeRequests.delete(parsed.id);
+                    if (parsed.error) reject(new Error(parsed.error));
+                    else resolve(parsed.result);
+                  }
+                } catch {}
+              });
+              ws.on('close', () => {
+                if (this.extensionSocket === ws) this.extensionSocket = null;
+              });
+            });
+          } else {
+            socket.destroy();
+          }
+        });
+
+        this.server.on('error', () => {
+          // If port is already in use by a running server, continue gracefully
+          resolve(false);
+        });
+
+        this.server.listen(port, host, () => {
+          resolve(true);
+        });
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
   stop() {
     if (this.wss) {
       try { this.wss.close(); } catch {}
     }
     if (this.server) {
-      this.server.close();
+      try { this.server.close(); } catch {}
     }
   }
 }

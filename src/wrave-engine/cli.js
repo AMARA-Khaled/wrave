@@ -74,6 +74,9 @@ async function runStdioMode(options) {
     },
   });
 
+  // Start internal WebSocket bridge so Brave extension connects quietly on port 8282
+  await mcpServer.startBridgeOnly(options.port || 8282, options.host || '127.0.0.1');
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,

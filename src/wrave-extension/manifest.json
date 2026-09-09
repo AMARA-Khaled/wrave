@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Wrave - AI Browser Gateway",
+  "name": "Wrave MCP server",
   "version": "1.1.0",
-  "description": "High-performance Model Context Protocol (MCP) browser gateway for Claude Code, Antigravity, and AI agents.",
+  "description": "Model Context Protocol (MCP) server for Brave Browser to automate tabs, inspect DOM, and execute scripts.",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -11,7 +11,7 @@
       "48": "icons/product_logo_48.png",
       "128": "icons/product_logo_128.png"
     },
-    "default_title": "Wrave MCP Gateway"
+    "default_title": "Wrave MCP server"
   },
   "options_page": "options.html",
   "options_ui": {

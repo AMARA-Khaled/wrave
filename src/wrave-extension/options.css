@@ -7,7 +7,7 @@
 
 body {
   background-color: #0d1117;
-  color: #e6edf3;
+  color: #c9d1d9;
   min-height: 100vh;
 }
 
@@ -18,7 +18,7 @@ body {
 
 /* Sidebar */
 .sidebar {
-  width: 260px;
+  width: 250px;
   background-color: #161b22;
   border-right: 1px solid #30363d;
   display: flex;
@@ -29,68 +29,63 @@ body {
 .sidebar-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 28px;
+  gap: 10px;
+  margin-bottom: 24px;
   padding: 0 8px;
 }
 
 .sidebar-header .logo {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
 }
 
 .sidebar-header h2 {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 1.5px;
-  background: linear-gradient(135deg, #00FF88 0%, #00BFFF 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  font-size: 15px;
+  font-weight: 600;
+  color: #f0f6fc;
 }
 
 .sidebar-header span {
   font-size: 11px;
   color: #8b949e;
-  text-transform: uppercase;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex: 1;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
   background: transparent;
   border: none;
   color: #8b949e;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 6px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   text-align: left;
   transition: all 0.15s;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #c9d1d9;
+  background: #21262d;
+  color: #f0f6fc;
 }
 
 .nav-item.active {
-  background: rgba(0, 255, 136, 0.1);
-  color: #00FF88;
-  border-left: 3px solid #00FF88;
+  background: #21262d;
+  color: #f0f6fc;
+  font-weight: 600;
 }
 
 .sidebar-footer {
   border-top: 1px solid #30363d;
-  padding-top: 16px;
+  padding-top: 14px;
   font-size: 12px;
   color: #8b949e;
 }
@@ -103,22 +98,25 @@ body {
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #f85149;
+  background: #d29922;
 }
 
 .status-dot.online {
-  background: #3fb950;
-  box-shadow: 0 0 6px #3fb950;
+  background: #238636;
+}
+
+.status-dot.offline {
+  background: #da3633;
 }
 
 /* Content */
 .content {
   flex: 1;
-  padding: 40px 48px;
-  max-width: 900px;
+  padding: 36px 44px;
+  max-width: 860px;
 }
 
 .tab-pane {
@@ -130,34 +128,34 @@ body {
 }
 
 .pane-header {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .pane-header h1 {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
   color: #f0f6fc;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .pane-header p {
   color: #8b949e;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .settings-group {
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .setting-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 20px;
+  padding: 14px 18px;
   border-bottom: 1px solid #21262d;
 }
 
@@ -167,10 +165,10 @@ body {
 
 .setting-info label {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #f0f6fc;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .setting-info p {
@@ -183,7 +181,7 @@ body {
   background: #0d1117;
   border: 1px solid #30363d;
   color: #e6edf3;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 6px;
   font-size: 13px;
   width: 220px;
@@ -198,8 +196,8 @@ body {
 .switch {
   position: relative;
   display: inline-block;
-  width: 44px;
-  height: 24px;
+  width: 40px;
+  height: 22px;
 }
 
 .switch input {
@@ -214,17 +212,17 @@ body {
   top: 0; left: 0; right: 0; bottom: 0;
   background-color: #30363d;
   transition: 0.2s;
-  border-radius: 24px;
+  border-radius: 22px;
 }
 
 .slider:before {
   position: absolute;
   content: "";
-  height: 18px;
-  width: 18px;
+  height: 16px;
+  width: 16px;
   left: 3px;
   bottom: 3px;
-  background-color: white;
+  background-color: #e6edf3;
   transition: 0.2s;
   border-radius: 50%;
 }
@@ -234,23 +232,24 @@ input:checked + .slider {
 }
 
 input:checked + .slider:before {
-  transform: translateX(20px);
+  transform: translateX(18px);
 }
 
 /* Buttons */
 .btn {
-  padding: 9px 16px;
+  padding: 7px 14px;
   border-radius: 6px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  border: none;
-  transition: all 0.2s;
+  border: 1px solid transparent;
+  transition: all 0.15s;
 }
 
 .btn.primary {
   background: #238636;
   color: #fff;
+  border-color: rgba(240, 246, 252, 0.1);
 }
 
 .btn.primary:hover {
@@ -265,7 +264,7 @@ input:checked + .slider:before {
 
 .btn.secondary:hover {
   background: #30363d;
-  color: #fff;
+  color: #f0f6fc;
 }
 
 .save-bar {
@@ -283,8 +282,8 @@ input:checked + .slider:before {
 .integration-card {
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 18px 20px;
+  border-radius: 6px;
+  padding: 16px 18px;
   margin-bottom: 16px;
 }
 
@@ -292,11 +291,12 @@ input:checked + .slider:before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .integration-header h3 {
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   color: #f0f6fc;
 }
 
@@ -304,15 +304,15 @@ input:checked + .slider:before {
   background: #21262d;
   border: 1px solid #30363d;
   color: #c9d1d9;
-  font-size: 12px;
-  padding: 4px 10px;
+  font-size: 11px;
+  padding: 3px 8px;
   border-radius: 4px;
   cursor: pointer;
 }
 
 .btn-copy:hover {
   background: #30363d;
-  color: #fff;
+  color: #f0f6fc;
 }
 
 .integration-card p {
@@ -325,27 +325,27 @@ pre {
   background: #0d1117;
   border: 1px solid #30363d;
   border-radius: 6px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   overflow-x: auto;
 }
 
 code {
-  font-family: "Consolas", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
   font-size: 12px;
-  color: #00FF88;
+  color: #e6edf3;
 }
 
 /* Console */
 .console-actions {
   display: flex;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
 .console-output {
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -353,19 +353,20 @@ code {
   background: #21262d;
   padding: 8px 14px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
   color: #8b949e;
+  letter-spacing: 0.3px;
 }
 
 #consoleOutput {
   background: #0d1117;
   border: none;
   border-radius: 0;
-  padding: 14px;
-  font-family: "Consolas", monospace;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
   font-size: 12px;
   color: #c9d1d9;
-  min-height: 220px;
+  min-height: 200px;
   white-space: pre-wrap;
 }
