@@ -1,53 +1,41 @@
-# Wrave MCP Server
+# Wrave
 
-> AI-Native Model Context Protocol (MCP) Gateway for Brave Browser  
-> Connect Google Antigravity, Claude Code, Claude Desktop, OpenAI Codex, OpenCode, Cursor, and any MCP-compliant AI agent directly to your active Brave browser.
+> High-performance Model Context Protocol (MCP) gateway for Brave Browser.  
+> Direct, low-latency browser automation for Claude Code, Antigravity, Codex, Cursor, and MCP clients.
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![MCP Compatible](https://img.shields.io/badge/MCP-2024--11--05-brightgreen.svg)](https://modelcontextprotocol.io/)
 [![npm version](https://img.shields.io/npm/v/wrave-mcp.svg)](https://www.npmjs.com/package/wrave-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
 ## Overview
 
-Wrave bridges AI coding assistants and autonomous agents to your live Brave browser session with zero friction. It is engineered for maximum speed, security, and developer ergonomics:
+Wrave provides full programmatic control of your active Brave browser session through the Model Context Protocol (MCP). It gives coding assistants and developer workflows direct access to interact with, inspect, and navigate live web applications:
 
-- **Non-Invasive**: Operates alongside your browser without modifying Brave Leo AI, Brave Rewards, Web3 Wallet, or your default New Tab experience.
-- **Compound 1-Turn Actions**: Drastically reduces multi-turn latency loops. Execute clicks, text entry, and form submissions while returning updated page snapshots in a single turn.
-- **Semantic Element Indexing**: Automatically tags clickable and input elements with indexed identifiers (`@1`, `@2`, `@3`, etc.), returning bounding boxes, labels, and roles so models never need to guess obfuscated CSS class names.
-- **Auto-Dismiss Overlays**: Detects and bypasses common modal dialogs (cookie banners, "Not Now", "Dismiss") during navigation and snapshot capture.
-- **Dual Transport Support**:
-  - **Stdio Mode**: Spawned automatically on demand by AI harnesses (no daemon or background server to manage).
-  - **Local HTTP/SSE Server**: Optional persistent server on `http://127.0.0.1:8282/mcp` (similar to Figma Dev Mode).
-- **Hybrid Automation Engine**:
-  - **CDP Engine** (`:9222`): Sub-millisecond direct Chrome DevTools Protocol automation.
-  - **Extension Bridge** (`:8282/extension`): High-speed WebSocket bridge directly through the extension without requiring special browser flags.
-- **Pure TypeScript**: Strongly typed codebase with comprehensive integration test coverage.
+- **1-Turn Compound Actions**: High-speed primitives like `click_and_read` and `type_and_submit` that combine interaction and page inspection into a single round-trip.
+- **Semantic Element Indexing**: Surfaces interactive elements with numbered references (`@1`, `@2`, `@3`, etc.), bounding boxes, and accessibility roles—eliminating brittle CSS selectors on dynamic apps.
+- **Full-Spectrum Inspection**: Clean DOM trees, accessibility hierarchies, full-page or viewport screenshots, intercepted console logs, network cookies, and tab state.
+- **Dual Transport Modes**: Works out of the box on demand via `stdio` (zero background services to manage) or as a local HTTP/SSE service.
+- **Zero Browser Modifications**: Runs directly alongside your everyday browser session without requiring special startup flags or separate browser drivers.
 
 ---
 
 ## Installation in Brave Browser
 
-Assuming you have downloaded the latest `wrave-extension-v*.zip` from [GitHub Releases](https://github.com/AMARA-Khaled/wrave/releases/latest):
-
-1. **Extract the ZIP Archive**: Unzip `wrave-extension-v*.zip` into a local directory on your machine.
-2. **Open Extensions Page**: Open Brave and navigate to:
+1. Download the latest `wrave-extension-v*.zip` from [GitHub Releases](https://github.com/AMARA-Khaled/wrave/releases/latest) and extract it.
+2. Open Brave and navigate to:
    ```
    brave://extensions
    ```
-3. **Enable Developer Mode**: Turn on the **Developer mode** toggle in the top-right corner.
-4. **Load the Extension**: Click **Load unpacked** and select the folder where you extracted the extension.
-5. **Pin to Toolbar**: Pin the Wrave extension icon for quick access to status, port diagnostics, and connection indicators.
-
-![Wrave Extension Dashboard](assets/dashboard.png)
+3. Enable the **Developer mode** toggle in the top-right corner.
+4. Click **Load unpacked** and select the extracted folder.
+5. (Optional) Pin the Wrave icon to your toolbar for quick status monitoring.
 
 ---
 
-## Connect Your AI Harness
+## Connect Your Client
 
-Wrave supports both automatic Stdio launching (recommended) and connecting to a persistent local server.
+Wrave supports automatic `stdio` launching (recommended) and connecting to a persistent local server.
 
 ### 1. Google Antigravity
 
@@ -81,13 +69,13 @@ If running `npx wrave-mcp --server`:
 
 ### 2. Claude Code (CLI)
 
-Add to Claude Code with a single terminal command:
+Add to Claude Code with a single command:
 
 ```bash
 # On-demand stdio (recommended)
 claude mcp add wrave -- npx -y wrave-mcp --stdio
 
-# Or connect to a running HTTP/SSE server:
+# Or connect to a running local server:
 claude mcp add wrave -- http://127.0.0.1:8282/mcp/sse
 ```
 
@@ -163,7 +151,7 @@ Add to `~/.cursor/mcp.json` or `~/.codeium/windsurf/mcp_config.json`:
 
 ## Available MCP Tools (21 Primitives)
 
-### High-Speed Compound Actions (1-Turn)
+### Compound Actions (1-Turn)
 | Tool Name | Description | Parameters |
 |---|---|---|
 | `wrave_get_snapshot` | Instant page snapshot with indexed interactive elements (`@1`, `@2`, etc.), title, and URL. | `tab_id` |
@@ -208,7 +196,7 @@ cd wrave
 # 2. Install dependencies
 npm install
 
-# 3. Build TypeScript codebase
+# 3. Build codebase
 npm run build
 
 # 4. Run automated test suite
@@ -216,32 +204,6 @@ npm test
 
 # 5. Package extension bundle
 npm run pack:extension
-```
-
----
-
-## Repository Structure
-
-```
-wrave/
-├── package.json              # Unified npm package manifest with TypeScript tooling
-├── tsconfig.json             # ES2022 / NodeNext compiler configuration
-├── assets/                   # Screenshots and documentation media
-├── dist/
-│   ├── wrave-engine/         # Compiled TypeScript JavaScript & d.ts declarations
-│   └── wrave-extension-*.zip # Packaged extension bundles for release
-└── src/
-    ├── wrave-extension/      # Unpacked Brave Browser Extension (MV3)
-    │   ├── manifest.json     # Clean DevTools/MCP toolbar manifest
-    │   ├── background.js     # Background Service Worker & WebSocket bridge
-    │   ├── popup.html/css/js # Dark-mode status popup
-    │   └── options.html/css/js# Diagnostic & settings page
-    └── wrave-engine/         # TypeScript MCP Engine Source
-        ├── types.ts          # Strong MCP & browser protocol interfaces
-        ├── cdp-engine.ts     # High-speed Chrome DevTools Protocol client
-        ├── mcp-server.ts     # Dual SSE / Stdio JSON-RPC 2.0 MCP server
-        ├── cli.ts            # CLI daemon & stdio launcher
-        └── test/             # Automated test suite
 ```
 
 ---
