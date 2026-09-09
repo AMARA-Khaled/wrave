@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       statusDot.className = 'status-dot online';
       statusText.textContent = 'Online';
       bridgeVal.textContent = cdpOnline ? 'CDP + WS Bridge' : 'WebSocket Bridge';
+      try { chrome.runtime.sendMessage({ action: 'reconnect' }); } catch {}
     } else {
       statusDot.className = 'status-dot offline';
       statusText.textContent = 'Offline';

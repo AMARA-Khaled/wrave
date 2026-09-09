@@ -97,6 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (res.status === 200 || res.status === 404 || res.status === 405) {
         sidebarStatusDot.className = 'status-dot online';
         sidebarStatusText.textContent = `MCP Online (:${port})`;
+        try { chrome.runtime.sendMessage({ action: 'reconnect' }); } catch {}
         return true;
       }
     } catch {}

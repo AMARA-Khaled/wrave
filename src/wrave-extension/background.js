@@ -100,6 +100,18 @@ function scheduleReconnect() {
 // Keep connection alive
 initBridge();
 
+try {
+  chrome.alarms.create('bridgeKeepAlive', { periodInMinutes: 0.2 });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'bridgeKeepAlive') {
+      initBridge();
+    }
+  });
+} catch {}
+
+chrome.tabs.onActivated.addListener(() => initBridge());
+chrome.tabs.onUpdated.addListener(() => initBridge());
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'reconnect') {
     if (bridgeSocket) {
