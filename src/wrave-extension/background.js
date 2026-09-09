@@ -3,6 +3,7 @@
 
 let bridgeSocket = null;
 let reconnectTimer = null;
+let isConnecting = false;
 
 async function getSettings() {
   return await chrome.storage.local.get({
@@ -30,24 +31,30 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 // 2. Connect to Local MCP Companion via WebSocket Bridge
 async function initBridge() {
+  if (isConnecting) return;
   if (bridgeSocket && (bridgeSocket.readyState === WebSocket.OPEN || bridgeSocket.readyState === WebSocket.CONNECTING)) {
     return;
   }
+  isConnecting = true;
 
-  const { mcpPort } = await getSettings();
-
-  // First verify daemon is online via quiet fetch to avoid net::ERR_CONNECTION_REFUSED console spam
+  let mcpPort = 8282;
   try {
+    const settings = await getSettings();
+    mcpPort = settings.mcpPort || 8282;
+
+    // First verify daemon is online via quiet fetch to avoid net::ERR_CONNECTION_REFUSED console spam
     const probe = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, {
       method: 'GET',
       signal: AbortSignal.timeout(1200)
     });
     if (!probe.ok && probe.status !== 200 && probe.status !== 404 && probe.status !== 405) {
+      isConnecting = false;
       scheduleReconnect();
       return;
     }
   } catch {
     // Daemon is currently offline (normal when not running HTTP server)
+    isConnecting = false;
     scheduleReconnect();
     return;
   }
@@ -55,18 +62,26 @@ async function initBridge() {
   const wsUrl = `ws://127.0.0.1:${mcpPort}/extension`;
 
   try {
-    bridgeSocket = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl);
+    bridgeSocket = ws;
 
-    bridgeSocket.onopen = () => {
+    ws.onopen = () => {
+      isConnecting = false;
       console.log('[Wrave Bridge] Connected to MCP Companion on port', mcpPort);
-      bridgeSocket.send(JSON.stringify({
-        type: 'register',
-        client: 'brave-extension',
-        version: '1.1.0'
-      }));
+      try {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'register',
+            client: 'brave-extension',
+            version: '1.1.0'
+          }));
+        }
+      } catch (sendErr) {
+        console.warn('[Wrave Bridge] Failed to send register message:', sendErr);
+      }
     };
 
-    bridgeSocket.onmessage = async (event) => {
+    ws.onmessage = async (event) => {
       try {
         const message = JSON.parse(event.data);
         handleCompanionCommand(message);
@@ -75,16 +90,19 @@ async function initBridge() {
       }
     };
 
-    bridgeSocket.onclose = () => {
-      bridgeSocket = null;
+    ws.onclose = () => {
+      if (bridgeSocket === ws) bridgeSocket = null;
+      isConnecting = false;
       scheduleReconnect();
     };
 
-    bridgeSocket.onerror = () => {
-      bridgeSocket = null;
+    ws.onerror = () => {
+      if (bridgeSocket === ws) bridgeSocket = null;
+      isConnecting = false;
       scheduleReconnect();
     };
   } catch (err) {
+    isConnecting = false;
     scheduleReconnect();
   }
 }
