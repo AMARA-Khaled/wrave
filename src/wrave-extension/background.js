@@ -35,6 +35,23 @@ async function initBridge() {
   }
 
   const { mcpPort } = await getSettings();
+
+  // First verify daemon is online via quiet fetch to avoid net::ERR_CONNECTION_REFUSED console spam
+  try {
+    const probe = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(1200)
+    });
+    if (!probe.ok && probe.status !== 200 && probe.status !== 404 && probe.status !== 405) {
+      scheduleReconnect();
+      return;
+    }
+  } catch {
+    // Daemon is currently offline (normal when not running HTTP server)
+    scheduleReconnect();
+    return;
+  }
+
   const wsUrl = `ws://127.0.0.1:${mcpPort}/extension`;
 
   try {
@@ -77,7 +94,7 @@ function scheduleReconnect() {
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     initBridge();
-  }, 5000);
+  }, 10000);
 }
 
 // Keep connection alive
