@@ -1,6 +1,6 @@
 {
   "name": "wrave-mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Wrave - AI-Native Model Context Protocol (MCP) Gateway for Brave Browser",
   "type": "module",
   "main": "dist/wrave-engine/cli.js",
