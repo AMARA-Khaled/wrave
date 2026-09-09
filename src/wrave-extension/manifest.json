@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Wrave MCP server",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Model Context Protocol (MCP) server for Brave Browser to automate tabs, inspect DOM, and execute scripts.",
   "action": {
     "default_popup": "popup.html",
