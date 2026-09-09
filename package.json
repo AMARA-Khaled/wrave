@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/wrave-engine/cli.js --server",
     "stdio": "node src/wrave-engine/cli.js --stdio",
+    "pack:extension": "powershell -Command \"New-Item -ItemType Directory -Path dist -Force | Out-Null; Compress-Archive -Path src/wrave-extension/* -DestinationPath dist/wrave-extension-v1.1.0.zip -Force\"",
     "test": "node src/wrave-engine/test/test-mcp.js"
   },
   "keywords": [
