@@ -140,7 +140,8 @@ async function handleCompanionCommand(cmd) {
 
   try {
     switch (method) {
-      case 'tabs_list': {
+      case 'tabs_list':
+      case 'tab_list': {
         const tabs = await chrome.tabs.query({});
         const list = tabs.map(t => ({
           id: t.id,
@@ -154,12 +155,21 @@ async function handleCompanionCommand(cmd) {
         break;
       }
 
-      case 'tab_create': {
+      case 'tab_create':
+      case 'tab_open': {
         const newTab = await chrome.tabs.create({
           url: params.url || 'https://google.com',
-          active: params.active !== false
+          active: params.active !== false && params.activate !== false
         });
-        reply({ tabId: newTab.id, url: newTab.url });
+        await waitForTabComplete(newTab.id, 2500);
+        await new Promise(r => setTimeout(r, 400));
+        const snapshot = await captureTabSnapshot(newTab.id);
+        reply({
+          tabId: newTab.id,
+          url: snapshot.url || newTab.url,
+          title: snapshot.title,
+          elements: snapshot.elements
+        });
         break;
       }
 
@@ -170,7 +180,8 @@ async function handleCompanionCommand(cmd) {
         break;
       }
 
-      case 'tab_activate': {
+      case 'tab_activate':
+      case 'tab_focus': {
         const tabId = parseInt(params.tabId, 10);
         await chrome.tabs.update(tabId, { active: true });
         reply({ success: true, tabId });
@@ -184,9 +195,10 @@ async function handleCompanionCommand(cmd) {
         break;
       }
 
-      case 'page_screenshot': {
-        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-        reply({ dataUrl });
+      case 'page_screenshot':
+      case 'tab_screenshot': {
+        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: params.format === 'jpeg' ? 'jpeg' : 'png' });
+        reply({ dataUrl, dataBase64: dataUrl ? dataUrl.replace(/^data:image\/\w+;base64,/, '') : '' });
         break;
       }
 
@@ -231,6 +243,12 @@ async function handleCompanionCommand(cmd) {
         break;
       }
 
+      case 'extension_reload': {
+        reply({ success: true, message: 'Reloading extension' });
+        setTimeout(() => chrome.runtime.reload(), 100);
+        break;
+      }
+
       case 'tab_get_state': {
         const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
         const tab = await chrome.tabs.get(tabId);
@@ -252,7 +270,10 @@ async function handleCompanionCommand(cmd) {
           target: { tabId },
           func: (sel) => {
             let el = null;
-            if (sel && !sel.startsWith('text:')) {
+            if (sel && sel.startsWith('@')) {
+              el = document.querySelector(`[data-wrave-ref="${sel}"]`);
+            }
+            if (!el && sel && !sel.startsWith('text:')) {
               try { el = document.querySelector(sel); } catch {}
             }
             if (!el && sel) {
@@ -268,7 +289,7 @@ async function handleCompanionCommand(cmd) {
             el.click();
             return { success: true };
           },
-          args: [params.selector]
+          args: [params.selector || params.target || '']
         });
         reply(results && results[0] ? results[0].result : { success: false });
         break;
@@ -279,7 +300,13 @@ async function handleCompanionCommand(cmd) {
         const results = await chrome.scripting.executeScript({
           target: { tabId },
           func: (sel, text, clear) => {
-            let el = sel ? document.querySelector(sel) : null;
+            let el = null;
+            if (sel && sel.startsWith('@')) {
+              el = document.querySelector(`[data-wrave-ref="${sel}"]`);
+            }
+            if (!el && sel) {
+              try { el = document.querySelector(sel); } catch {}
+            }
             if (!el) {
               el = document.querySelector('div[contenteditable="true"], div[role="textbox"], textarea, input[type="text"]');
             }
@@ -296,9 +323,89 @@ async function handleCompanionCommand(cmd) {
             }
             return { success: true, textEntered: text };
           },
-          args: [params.selector || '', params.text || '', !!params.clear_first]
+          args: [params.selector || params.target || '', params.text || '', !!params.clear_first]
         });
         reply(results && results[0] ? results[0].result : { success: false });
+        break;
+      }
+
+      case 'page_type_and_submit': {
+        const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (sel, text, clear, submitKey) => {
+            let el = null;
+            if (sel && sel.startsWith('@')) {
+              el = document.querySelector(`[data-wrave-ref="${sel}"]`);
+            }
+            if (!el && sel) {
+              try { el = document.querySelector(sel); } catch {}
+            }
+            if (!el) {
+              el = document.querySelector('div[contenteditable="true"], div[role="textbox"], textarea, input[type="text"]');
+            }
+            if (!el) return { success: false, error: 'Input element not found' };
+            el.focus();
+            if (el.isContentEditable) {
+              if (clear) el.innerText = '';
+              document.execCommand('insertText', false, text);
+            } else {
+              if (clear) el.value = '';
+              el.value += text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const keyName = submitKey || 'Enter';
+            const code = keyName === 'Enter' ? 13 : 0;
+            const eventInit = { key: keyName, code: keyName, keyCode: code, which: code, bubbles: true, cancelable: true };
+            el.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+            el.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+            el.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+            return { success: true, textEntered: text, submittedKey: keyName };
+          },
+          args: [params.selector || params.target || '', params.text || '', !!params.clear_first, params.submit_key || 'Enter']
+        });
+        reply(results && results[0] ? results[0].result : { success: false });
+        break;
+      }
+
+      case 'page_click_and_read': {
+        const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (sel) => {
+            let el = null;
+            if (sel && sel.startsWith('@')) {
+              el = document.querySelector(`[data-wrave-ref="${sel}"]`);
+            }
+            if (!el && sel && !sel.startsWith('text:')) {
+              try { el = document.querySelector(sel); } catch {}
+            }
+            if (!el && sel) {
+              const query = sel.replace(/^text:/i, '').trim().toLowerCase();
+              const all = Array.from(document.querySelectorAll('div, span, p, a, button, h1, h2, h3, h4'));
+              const matches = all.filter(e => e.children.length <= 2 && e.innerText && e.innerText.trim().toLowerCase().includes(query));
+              if (matches.length > 0) {
+                el = matches[0].closest('div[role="button"], a, div[tabindex], button') || matches[0];
+              }
+            }
+            if (el) {
+              el.scrollIntoView({ block: 'center' });
+              el.click();
+            }
+          },
+          args: [params.selector || params.target || '']
+        });
+        await new Promise(r => setTimeout(r, 600));
+        const snapshot = await captureTabSnapshot(tabId);
+        reply(snapshot);
+        break;
+      }
+
+      case 'page_get_snapshot': {
+        const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
+        const snapshot = await captureTabSnapshot(tabId);
+        reply(snapshot);
         break;
       }
 
@@ -374,4 +481,102 @@ async function handleCompanionCommand(cmd) {
 async function getActiveTabId() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs && tabs[0] ? tabs[0].id : null;
+}
+
+function waitForTabComplete(tabId, maxWaitMs = 2500) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(async () => {
+      if (!resolved) {
+        resolved = true;
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve(await chrome.tabs.get(tabId).catch(() => null));
+      }
+    }, maxWaitMs);
+
+    const listener = (updatedTabId, changeInfo, tab) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve(tab);
+        }
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function captureTabSnapshot(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const dismissKeywords = ['not now', 'close', 'dismiss', 'cancel', 'accept cookies', 'decline optional cookies', 'got it'];
+        const dialogButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+        for (const btn of dialogButtons) {
+          const txt = (btn.innerText || '').trim().toLowerCase();
+          const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+          if (dismissKeywords.includes(txt) || ['close', 'dismiss'].includes(aria)) {
+            if (btn.closest('div[role="dialog"], div[aria-modal="true"], section[role="dialog"]')) {
+              try { btn.click(); } catch {}
+            }
+          }
+        }
+
+        const candidates = Array.from(document.querySelectorAll(
+          'a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="tab"], [role="menuitem"], [role="checkbox"], [contenteditable="true"], [tabindex="0"]'
+        ));
+
+        let refIdx = 1;
+        const elements = [];
+
+        for (const el of candidates) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) continue;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+
+          const ref = '@' + (refIdx++);
+          el.setAttribute('data-wrave-ref', ref);
+
+          const tag = el.tagName.toLowerCase();
+          const role = el.getAttribute('role') || (tag === 'button' ? 'button' : tag === 'a' ? 'link' : undefined);
+          const text = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').substring(0, 80);
+          const placeholder = el.getAttribute('placeholder') || el.getAttribute('aria-placeholder') || undefined;
+          const ariaLabel = el.getAttribute('aria-label') || undefined;
+          const type = el.getAttribute('type') || undefined;
+          const title = el.getAttribute('title') || undefined;
+
+          if (!text && !placeholder && !ariaLabel && !title && tag === 'div' && el.querySelector('button, a, input, textarea')) {
+            continue;
+          }
+
+          elements.push({
+            ref,
+            tag,
+            role: role || (el.isContentEditable ? 'textbox' : undefined),
+            text: text || undefined,
+            placeholder,
+            ariaLabel,
+            type,
+            title,
+            box: [Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)]
+          });
+
+          if (elements.length >= 60) break;
+        }
+
+        return {
+          title: document.title,
+          url: window.location.href,
+          elements
+        };
+      }
+    });
+    return results && results[0] ? results[0].result : { title: '', url: '', elements: [] };
+  } catch (e) {
+    return { title: '', url: '', elements: [], error: e.message };
+  }
 }

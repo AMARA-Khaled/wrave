@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Wrave Model Context Protocol (MCP) Server (TypeScript)
  * Exposes Wrave browser automation to AI harnesses (Claude Code, Antigravity, Codex, OpenCode).
  * Supports SSE, Stdio, and HTTP POST JSON-RPC 2.0 with Bearer token authentication.
@@ -256,6 +256,46 @@ export class WraveMcpServer {
           required: ['tab_id'],
         },
       },
+      {
+        name: 'wrave_get_snapshot',
+        description: 'Instant page snapshot with indexed interactive elements (@1, @2, etc.), title, and URL.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            tab_id: { type: 'string', description: 'The ID of the tab' },
+          },
+          required: ['tab_id'],
+        },
+      },
+      {
+        name: 'wrave_click_and_read',
+        description: 'Click an element (by selector, @ref like @1, or x/y) and immediately return the updated page snapshot in 1 turn.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            tab_id: { type: 'string', description: 'The ID of the tab' },
+            selector: { type: 'string', description: 'CSS selector or @ref (e.g. @1, @4) to click' },
+            x: { type: 'number', description: 'Optional explicit X coordinate' },
+            y: { type: 'number', description: 'Optional explicit Y coordinate' },
+          },
+          required: ['tab_id'],
+        },
+      },
+      {
+        name: 'wrave_type_and_submit',
+        description: 'Type text into an input or contenteditable field and submit with Enter key in 1 turn.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            tab_id: { type: 'string', description: 'The ID of the tab' },
+            selector: { type: 'string', description: 'CSS selector or @ref (e.g. @1, @2) of the input element' },
+            text: { type: 'string', description: 'The text to type' },
+            clear_first: { type: 'boolean', default: false, description: 'Clear existing text before typing' },
+            submit_key: { type: 'string', default: 'Enter', description: 'Key to send after typing (default Enter)' },
+          },
+          required: ['tab_id', 'selector', 'text'],
+        },
+      },
     ];
   }
 
@@ -334,6 +374,14 @@ export class WraveMcpServer {
           return await this.cdpEngine.printToPdf(args.tab_id);
         case 'wrave_get_console_logs':
           return await this.cdpEngine.getConsoleLogs(args.tab_id);
+        case 'wrave_get_snapshot':
+          return await this.cdpEngine.getSnapshot(args.tab_id);
+        case 'wrave_click_and_read': {
+          const target = (args.x !== undefined && args.y !== undefined) ? { x: args.x, y: args.y } : args.selector;
+          return await this.cdpEngine.clickAndRead(args.tab_id, target);
+        }
+        case 'wrave_type_and_submit':
+          return await this.cdpEngine.typeAndSubmit(args.tab_id, args.selector, args.text, args.clear_first, args.submit_key || 'Enter');
       }
     }
 
@@ -341,31 +389,38 @@ export class WraveMcpServer {
     if (this.extensionSocket && this.extensionSocket.readyState === WebSocket.OPEN) {
       switch (name) {
         case 'wrave_list_tabs':
-          return await this.sendBridgeCommand('tab_list');
+          return await this.sendBridgeCommand('tabs_list');
         case 'wrave_open_tab':
-          return await this.sendBridgeCommand('tab_open', { url: args.url, activate: args.activate !== false });
+          return await this.sendBridgeCommand('tab_create', { url: args.url, active: args.activate !== false });
         case 'wrave_close_tab':
           return await this.sendBridgeCommand('tab_close', { tabId: args.tab_id });
         case 'wrave_focus_tab':
-          return await this.sendBridgeCommand('tab_focus', { tabId: args.tab_id });
+          return await this.sendBridgeCommand('tab_activate', { tabId: args.tab_id });
         case 'wrave_reload_tab':
-          return await this.sendBridgeCommand('tab_reload', { tabId: args.tab_id, ignoreCache: args.ignore_cache });
+          return await this.sendBridgeCommand('tab_reload', { tabId: args.tab_id, ignore_cache: args.ignore_cache });
         case 'wrave_get_tab_state':
           return await this.sendBridgeCommand('tab_get_state', { tabId: args.tab_id });
         case 'wrave_take_screenshot': {
-          const shot = await this.sendBridgeCommand('tab_screenshot', { tabId: args.tab_id, format: args.format || 'png' });
+          const shot = await this.sendBridgeCommand('page_screenshot', { tabId: args.tab_id, format: args.format || 'png' });
+          const dataBase64 = shot.dataUrl ? shot.dataUrl.replace(/^data:image\/\w+;base64,/, '') : (shot.dataBase64 || '');
           return {
             _isImage: true,
             mimeType: `image/${args.format || 'png'}`,
-            data: shot.dataBase64,
+            data: dataBase64,
           };
         }
         case 'wrave_get_dom_tree':
           return await this.sendBridgeCommand('page_get_dom', { tabId: args.tab_id, html: !!args.html });
+        case 'wrave_get_snapshot':
+          return await this.sendBridgeCommand('page_get_snapshot', { tabId: args.tab_id });
         case 'wrave_click':
           return await this.sendBridgeCommand('page_click', { tabId: args.tab_id, selector: args.selector || '', x: args.x, y: args.y });
+        case 'wrave_click_and_read':
+          return await this.sendBridgeCommand('page_click_and_read', { tabId: args.tab_id, selector: args.selector || '', x: args.x, y: args.y });
         case 'wrave_type_text':
           return await this.sendBridgeCommand('page_type_text', { tabId: args.tab_id, selector: args.selector || '', text: args.text || '', clear_first: !!args.clear_first });
+        case 'wrave_type_and_submit':
+          return await this.sendBridgeCommand('page_type_and_submit', { tabId: args.tab_id, selector: args.selector || '', text: args.text || '', clear_first: !!args.clear_first, submit_key: args.submit_key || 'Enter' });
         case 'wrave_press_key':
           return await this.sendBridgeCommand('page_press_key', { tabId: args.tab_id, key: args.key });
         case 'wrave_scroll_page':
@@ -470,8 +525,9 @@ export class WraveMcpServer {
 
         // CORS Headers
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, x-session-id');
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, x-session-id');
 
         if (req.method === 'OPTIONS') {
           res.writeHead(204);
@@ -492,21 +548,27 @@ export class WraveMcpServer {
         }
 
         const acceptsSse = (req.headers.accept || '').includes('text/event-stream');
+        const wantsJson = (req.headers.accept || '').includes('application/json');
 
-        // SSE Endpoint (MCP Specification) - supports both /mcp/sse and /mcp with SSE accept header
-        if (req.method === 'GET' && (parsedUrl.pathname === '/mcp/sse' || (parsedUrl.pathname === '/mcp' && acceptsSse))) {
+        // SSE Endpoint (MCP Specification) - supports both /mcp/sse and /mcp
+        if (req.method === 'GET' && (parsedUrl.pathname === '/mcp/sse' || (parsedUrl.pathname === '/mcp' && (acceptsSse || !wantsJson)))) {
+          const sessionId = crypto.randomBytes(8).toString('hex');
+          const hostHeader = req.headers.host || `${this.host}:${this.port}`;
+
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
             'Access-Control-Allow-Origin': '*',
+            'Mcp-Session-Id': sessionId,
+            'mcp-session-id': sessionId,
+            'Access-Control-Expose-Headers': 'Mcp-Session-Id, mcp-session-id',
           });
 
-          const sessionId = crypto.randomBytes(8).toString('hex');
           this.sseSessions.set(sessionId, res);
 
-          // Inform MCP client of message endpoint
-          res.write(`event: endpoint\ndata: /mcp/message?sessionId=${sessionId}\n\n`);
+          // Inform MCP client of message endpoint with full absolute URL
+          res.write(`event: endpoint\ndata: http://${hostHeader}/mcp/message?sessionId=${sessionId}\n\n`);
 
           const heartbeat = setInterval(() => {
             try { res.write(': ping\n\n'); } catch {}
@@ -520,7 +582,7 @@ export class WraveMcpServer {
         }
 
         // Health / Diagnostic Endpoint (JSON)
-        if (req.method === 'GET' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/health')) {
+        if (req.method === 'GET' && (parsedUrl.pathname === '/health' || (parsedUrl.pathname === '/mcp' && wantsJson))) {
           const cdpAvailable = await this.cdpEngine.isCdpAvailable();
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
@@ -535,24 +597,32 @@ export class WraveMcpServer {
           return;
         }
 
-        // HTTP JSON-RPC Endpoint (Supports both direct POST and SSE message routing)
-        if (req.method === 'POST' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/mcp/message')) {
+        // HTTP JSON-RPC Endpoint (Supports Streamable HTTP, direct POST, and SSE message routing)
+        if (req.method === 'POST' && (parsedUrl.pathname === '/mcp' || parsedUrl.pathname === '/mcp/message' || parsedUrl.pathname === '/mcp/sse')) {
           let body = '';
           req.on('data', (chunk) => (body += chunk));
           req.on('end', async () => {
             try {
               const msg = JSON.parse(body) as JsonRpcRequest;
               const rpcRes = await this.handleRpcMessage(msg, 'HTTP Client');
-              const sessionId = parsedUrl.searchParams.get('sessionId');
-              const sseRes = sessionId
-                ? this.sseSessions.get(sessionId)
-                : (this.sseSessions.size === 1 ? Array.from(this.sseSessions.values())[0] : null);
+              const sessionId = (req.headers['mcp-session-id'] as string) ||
+                                (req.headers['x-session-id'] as string) ||
+                                parsedUrl.searchParams.get('sessionId') ||
+                                (this.sseSessions.size === 1 ? Array.from(this.sseSessions.keys())[0] : null) ||
+                                crypto.randomBytes(8).toString('hex');
+
+              const sseRes = sessionId ? this.sseSessions.get(sessionId) : null;
 
               if (sseRes && rpcRes) {
                 try {
                   sseRes.write(`event: message\ndata: ${JSON.stringify(rpcRes)}\n\n`);
                 } catch {}
               }
+
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              res.setHeader('Mcp-Session-Id', sessionId);
+              res.setHeader('mcp-session-id', sessionId);
+              res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id, mcp-session-id');
 
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify(rpcRes || { jsonrpc: '2.0', id: null, result: {} }));

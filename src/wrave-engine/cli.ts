@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * Wrave MCP CLI & Daemon Entry Point (TypeScript)
  * Usage:
@@ -113,7 +113,7 @@ async function runServerMode(options: CliOptions): Promise<void> {
   const mcpServer = new WraveMcpServer({
     port: options.port,
     host: options.host,
-    authToken: options.token || 'wrave-agent-' + Math.random().toString(36).substring(2, 10),
+    authToken: options.token === 'none' ? undefined : (options.token || 'wrave-agent-' + Math.random().toString(36).substring(2, 10)),
     cdpOptions: {
       host: options.cdpHost,
       port: options.cdpPort,

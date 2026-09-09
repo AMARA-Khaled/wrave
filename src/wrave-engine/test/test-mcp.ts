@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Automated Verification Suite for Wrave MCP & CDP Automation Engine (TypeScript)
  */
 
@@ -93,7 +93,10 @@ async function runTestSuite(): Promise<void> {
     assert(toolNames.has('wrave_get_accessibility_tree'));
     assert(toolNames.has('wrave_execute_script'));
     assert(toolNames.has('wrave_get_cookies'));
-    console.log(`[PASS] tools/list returned ${toolsRes.result.tools.length} browser automation primitives`);
+    assert(toolNames.has('wrave_get_snapshot'), 'Missing wrave_get_snapshot');
+    assert(toolNames.has('wrave_click_and_read'), 'Missing wrave_click_and_read');
+    assert(toolNames.has('wrave_type_and_submit'), 'Missing wrave_type_and_submit');
+    console.log(`[PASS] tools/list returned ${toolsRes.result.tools.length} browser automation primitives (including compound snapshot & interaction tools)`);
 
     // 5. Test SSE stream handshake and bidirectional message routing
     const controller = new AbortController();
@@ -103,13 +106,15 @@ async function runTestSuite(): Promise<void> {
 
     assert.strictEqual(sseResponse.status, 200);
     assert.strictEqual(sseResponse.headers.get('content-type'), 'text/event-stream');
+    assert(sseResponse.headers.get('mcp-session-id'), 'Expected Mcp-Session-Id header in SSE response');
 
     const reader = sseResponse.body!.getReader();
     const { value: chunkVal } = await reader.read();
     const chunkStr = new TextDecoder().decode(chunkVal);
     assert(chunkStr.includes('event: endpoint'), 'Expected endpoint event in SSE');
+    assert(chunkStr.includes('http://'), 'Expected absolute http:// URL in endpoint event');
     assert(chunkStr.includes('sessionId='), 'Expected sessionId in endpoint event');
-    console.log('[PASS] MCP Server-Sent Events (SSE) stream handshake verified');
+    console.log('[PASS] MCP Server-Sent Events (SSE) stream handshake verified with absolute URL & Mcp-Session-Id header');
 
     // Extract sessionId
     const sessionMatch = chunkStr.match(/sessionId=([a-f0-9]+)/);
@@ -123,6 +128,7 @@ async function runTestSuite(): Promise<void> {
       body: JSON.stringify({ jsonrpc: '2.0', id: 42, method: 'tools/list' }),
     });
     assert(postRes.status === 200 || postRes.status === 202, `Expected status 200 or 202, got ${postRes.status}`);
+    assert(postRes.headers.get('mcp-session-id'), 'Expected Mcp-Session-Id header in POST response');
 
     // Read response from SSE stream
     const { value: respChunk } = await reader.read();

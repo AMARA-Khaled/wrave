@@ -51,6 +51,12 @@ export declare class WraveCdpEngine {
         y: number;
     }): Promise<any>;
     typeText(tabId: string, selector: string, text: string, clearFirst?: boolean): Promise<any>;
+    typeAndSubmit(tabId: string, selector: string, text: string, clearFirst?: boolean, submitKey?: string): Promise<any>;
+    clickAndRead(tabId: string, target: string | {
+        x: number;
+        y: number;
+    }): Promise<any>;
+    getSnapshot(tabId: string): Promise<any>;
     pressKey(tabId: string, key: string): Promise<any>;
     scrollPage(tabId: string, deltaX?: number, deltaY?: number): Promise<any>;
     executeScript(tabId: string, expression: string): Promise<any>;

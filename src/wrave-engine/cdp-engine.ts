@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Wrave High-Speed CDP Automation Engine
  * Connects directly to Chromium / Brave remote debugging protocol (CDP).
  */
@@ -324,7 +324,8 @@ export class WraveCdpEngine {
     } else if (typeof target === 'string') {
       const res = await this.sendCdpCommand(tabId, 'Runtime.evaluate', {
         expression: `(function() {
-          const el = document.querySelector(${JSON.stringify(target)});
+          const sel = ${JSON.stringify(target)};
+          const el = sel.startsWith('@') ? document.querySelector('[data-wrave-ref="' + sel + '"]') : document.querySelector(sel);
           if (!el) return null;
           const r = el.getBoundingClientRect();
           return { x: r.x + r.width / 2, y: r.y + r.height / 2, isPassword: el.type === 'password' };
@@ -375,7 +376,8 @@ export class WraveCdpEngine {
     if (selector) {
       await this.sendCdpCommand(tabId, 'Runtime.evaluate', {
         expression: `(function() {
-          const el = document.querySelector(${JSON.stringify(selector)});
+          const sel = ${JSON.stringify(selector)};
+          const el = sel.startsWith('@') ? document.querySelector('[data-wrave-ref="' + sel + '"]') : document.querySelector(sel);
           if (!el) return null;
           el.focus();
           if (${clearFirst}) el.value = '';
@@ -397,6 +399,91 @@ export class WraveCdpEngine {
     }
 
     return { tabId, selector, textLength: text.length, status: 'typed' };
+  }
+
+  async typeAndSubmit(tabId: string, selector: string, text: string, clearFirst = false, submitKey = 'Enter'): Promise<any> {
+    await this.typeText(tabId, selector, text, clearFirst);
+    await this.pressKey(tabId, submitKey);
+    return { tabId, selector, textEntered: text, submittedKey: submitKey, status: 'typed_and_submitted' };
+  }
+
+  async clickAndRead(tabId: string, target: string | { x: number; y: number }): Promise<any> {
+    await this.click(tabId, target);
+    await new Promise((r) => setTimeout(r, 600));
+    return await this.getSnapshot(tabId);
+  }
+
+  async getSnapshot(tabId: string): Promise<any> {
+    const script = `
+      (function() {
+        const dismissKeywords = ['not now', 'close', 'dismiss', 'cancel', 'accept cookies', 'decline optional cookies', 'got it'];
+        const dialogButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+        for (const btn of dialogButtons) {
+          const txt = (btn.innerText || '').trim().toLowerCase();
+          const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+          if (dismissKeywords.includes(txt) || ['close', 'dismiss'].includes(aria)) {
+            if (btn.closest('div[role="dialog"], div[aria-modal="true"], section[role="dialog"]')) {
+              try { btn.click(); } catch {}
+            }
+          }
+        }
+
+        const candidates = Array.from(document.querySelectorAll(
+          'a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="tab"], [role="menuitem"], [role="checkbox"], [contenteditable="true"], [tabindex="0"]'
+        ));
+
+        let refIdx = 1;
+        const elements = [];
+
+        for (const el of candidates) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) continue;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+
+          const ref = '@' + (refIdx++);
+          el.setAttribute('data-wrave-ref', ref);
+
+          const tag = el.tagName.toLowerCase();
+          const role = el.getAttribute('role') || (tag === 'button' ? 'button' : tag === 'a' ? 'link' : undefined);
+          const text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').substring(0, 80);
+          const placeholder = el.getAttribute('placeholder') || el.getAttribute('aria-placeholder') || undefined;
+          const ariaLabel = el.getAttribute('aria-label') || undefined;
+          const type = el.getAttribute('type') || undefined;
+          const title = el.getAttribute('title') || undefined;
+
+          if (!text && !placeholder && !ariaLabel && !title && tag === 'div' && el.querySelector('button, a, input, textarea')) {
+            continue;
+          }
+
+          elements.push({
+            ref,
+            tag,
+            role: role || (el.isContentEditable ? 'textbox' : undefined),
+            text: text || undefined,
+            placeholder,
+            ariaLabel,
+            type,
+            title,
+            box: [Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)]
+          });
+
+          if (elements.length >= 60) break;
+        }
+
+        return {
+          title: document.title,
+          url: window.location.href,
+          elements
+        };
+      })()
+    `;
+    const res = await this.sendCdpCommand(tabId, 'Runtime.evaluate', {
+      expression: script,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    return res.result.value;
   }
 
   async pressKey(tabId: string, key: string): Promise<any> {

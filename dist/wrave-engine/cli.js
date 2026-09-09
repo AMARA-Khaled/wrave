@@ -100,7 +100,7 @@ async function runServerMode(options) {
     const mcpServer = new WraveMcpServer({
         port: options.port,
         host: options.host,
-        authToken: options.token || 'wrave-agent-' + Math.random().toString(36).substring(2, 10),
+        authToken: options.token === 'none' ? undefined : (options.token || 'wrave-agent-' + Math.random().toString(36).substring(2, 10)),
         cdpOptions: {
             host: options.cdpHost,
             port: options.cdpPort,

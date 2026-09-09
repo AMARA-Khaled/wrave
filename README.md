@@ -1,4 +1,4 @@
-﻿# 🌿 Wrave MCP Server
+# 🌿 Wrave MCP Server
 
 > **AI-Native Model Context Protocol (MCP) Browser Automation Gateway for Brave Browser**  
 > Connect **Google Antigravity**, **Claude Code**, **Claude Desktop**, **OpenAI Codex**, **OpenCode**, **Cursor**, and any MCP-compliant AI agent directly to your active Brave browser.
@@ -156,12 +156,20 @@ Add to `~/.cursor/mcp.json` or `~/.codeium/windsurf/mcp_config.json`:
 
 ---
 
-## 🧰 Available MCP Tools (18 Primitives)
+## 🧰 Available MCP Tools (21 Primitives)
 
+### ⚡ Compound High-Speed Automation (1-Turn Actions)
+| Tool Name | Description | Key Arguments |
+|---|---|---|
+| `wrave_get_snapshot` | Instant page snapshot with indexed interactive elements (`@1`, `@2`, etc.), title, and URL. | `tab_id` |
+| `wrave_click_and_read` | Click an element (by selector, `@ref` like `@1`, or x/y) and immediately return the updated page snapshot in 1 turn. | `tab_id`, `selector`, `x`, `y` |
+| `wrave_type_and_submit` | Type text into an input or contenteditable field and submit with Enter key in 1 turn. | `tab_id`, `selector`, `text`, `clear_first`, `submit_key` |
+
+### 🌐 Core Navigation & Inspection
 | Tool Name | Description | Key Arguments |
 |---|---|---|
 | `wrave_list_tabs` | List all open tabs with ID, title, URL, and active state. | *None* |
-| `wrave_open_tab` | Open a new tab with specified URL. | `url`, `activate` (bool) |
+| `wrave_open_tab` | Open a new tab with specified URL (auto-returns page snapshot & indexed elements). | `url`, `activate` (bool) |
 | `wrave_close_tab` | Close an open tab by its ID. | `tab_id` |
 | `wrave_focus_tab` | Bring tab to foreground and activate it. | `tab_id` |
 | `wrave_reload_tab` | Reload tab with optional cache bypass. | `tab_id`, `ignore_cache` |
@@ -169,9 +177,13 @@ Add to `~/.cursor/mcp.json` or `~/.codeium/windsurf/mcp_config.json`:
 | `wrave_get_dom_tree` | Extract clean, LLM-friendly DOM tree with bounding boxes `[x, y, w, h]` or raw HTML. | `tab_id`, `max_depth`, `html` |
 | `wrave_get_accessibility_tree` | Extract full AX accessibility tree (roles, labels, values). | `tab_id` |
 | `wrave_take_screenshot` | Capture viewport or full-page screenshot as base64 image. | `tab_id`, `full_page`, `format` |
-| `wrave_click` | Dispatch click to element selector or pixel coordinates. Supports `text:` query. | `tab_id`, `selector`, `x`, `y` |
-| `wrave_double_click` | Dispatch double-click to element selector. | `tab_id`, `selector` |
-| `wrave_type_text` | Type text into inputs, textareas, and rich contenteditable editors. | `tab_id`, `selector`, `text`, `clear_first` |
+
+### 🎯 Direct Interaction Primitives
+| Tool Name | Description | Key Arguments |
+|---|---|---|
+| `wrave_click` | Dispatch click to element selector, `@ref` (e.g. `@1`), or pixel coordinates. | `tab_id`, `selector`, `x`, `y` |
+| `wrave_double_click` | Dispatch double-click to element selector or `@ref`. | `tab_id`, `selector` |
+| `wrave_type_text` | Type text into inputs, textareas, and rich contenteditable editors (`@ref` supported). | `tab_id`, `selector`, `text`, `clear_first` |
 | `wrave_press_key` | Dispatch native keyboard key event (Enter, Tab, Escape, etc.). | `tab_id`, `key` |
 | `wrave_scroll_page` | Scroll viewport or target scrollable container. | `tab_id`, `delta_y`, `delta_x` |
 | `wrave_execute_script` | Evaluate arbitrary JavaScript expression in tab context. | `tab_id`, `script` |
