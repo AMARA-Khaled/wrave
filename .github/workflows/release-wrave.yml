@@ -1,0 +1,58 @@
+name: Release Wrave Browser
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout Wrave Core
+        uses: actions/checkout@v4
+        with:
+          path: src/brave
+
+      - name: Setup Node.js & pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Setup Depot Tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git $HOME/depot_tools
+          echo "$HOME/depot_tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Sync Dependencies & Chromium Sources
+        working-directory: src/brave
+        run: |
+          pnpm install --frozen-lockfile
+          npm run init
+
+      - name: Build Wrave Release Binary
+        working-directory: src/brave
+        run: |
+          npm run build -- --target=create_dist --config=Release
+
+      - name: Bundle Wrave MCP Engine
+        run: |
+          New-Item -ItemType Directory -Path dist/Wrave -Force
+          Copy-Item -Path src/wrave-engine -Destination dist/Wrave/engine -Recurse
+          Copy-Item -Path src/wrave-branding -Destination dist/Wrave/branding -Recurse
+          Copy-Item -Path wrave.bat -Destination dist/Wrave/
+          Copy-Item -Path install_wrave.ps1 -Destination dist/Wrave/
+          Compress-Archive -Path dist/Wrave/* -DestinationPath dist/Wrave-Windows-x64.zip
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Wrave-Windows-x64.zip
+            src/out/Release/wrave_installer.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

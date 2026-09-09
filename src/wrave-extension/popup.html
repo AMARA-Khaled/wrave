@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wrave Gateway</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="header">
+      <div class="brand">
+        <img src="icons/product_logo_32.png" alt="Weedex Mascot" class="mascot-icon">
+        <div>
+          <span class="brand-title">WRAVE</span>
+          <span class="brand-sub">AI Browser Gateway</span>
+        </div>
+      </div>
+      <div class="status-pill" id="statusPill">
+        <span class="dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Checking...</span>
+      </div>
+    </header>
+
+    <div class="card active-tab-card">
+      <div class="card-label">Active Browser Context</div>
+      <div class="tab-title" id="activeTabTitle">Loading active tab...</div>
+      <div class="tab-url" id="activeTabUrl">about:blank</div>
+    </div>
+
+    <div class="card mcp-config-card">
+      <div class="card-header">
+        <span class="card-label">Connect AI Harness</span>
+        <button class="copy-btn" id="copyBtn">📋 Copy</button>
+      </div>
+      <code class="mcp-code" id="mcpCode">claude mcp add wrave -- http://127.0.0.1:8282/mcp/sse</code>
+    </div>
+
+    <div class="quick-stats">
+      <div class="stat-item">
+        <span class="stat-label">MCP Port</span>
+        <span class="stat-val" id="mcpPortVal">:8282</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">CDP Port</span>
+        <span class="stat-val" id="cdpPortVal">:9222</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Bridge</span>
+        <span class="stat-val" id="bridgeVal">Direct</span>
+      </div>
+    </div>
+
+    <div class="footer-actions">
+      <button class="btn primary" id="openSettingsBtn">⚙️ Wrave MCP Settings</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

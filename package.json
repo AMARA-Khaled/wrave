@@ -1,0 +1,22 @@
+{
+  "name": "wrave",
+  "version": "1.1.0",
+  "description": "Wrave - AI-Native Model Context Protocol (MCP) Gateway for Brave Browser",
+  "type": "module",
+  "scripts": {
+    "start": "node src/wrave-engine/cli.js --server",
+    "stdio": "node src/wrave-engine/cli.js --stdio",
+    "test": "node src/wrave-engine/test/test-mcp.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "brave",
+    "browser-automation",
+    "claude-code",
+    "antigravity",
+    "ai-agent"
+  ],
+  "author": "AMARA-Khaled",
+  "license": "MIT"
+}
