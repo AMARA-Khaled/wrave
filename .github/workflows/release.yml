@@ -1,0 +1,36 @@
+name: Release Wrave Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Package Extension
+        run: |
+          mkdir -p dist
+          cd src/wrave-extension
+          zip -r ../../dist/wrave-extension-${{ github.ref_name }}.zip .
+          cd ../..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/wrave-extension-${{ github.ref_name }}.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
