@@ -536,18 +536,14 @@ export class WraveMcpServer {
                 ? this.sseSessions.get(sessionId)
                 : (this.sseSessions.size === 1 ? Array.from(this.sseSessions.values())[0] : null);
 
-              if (sseRes) {
-                // Return response over SSE stream per MCP specification
-                if (rpcRes) {
+              if (sseRes && rpcRes) {
+                try {
                   sseRes.write(`event: message\ndata: ${JSON.stringify(rpcRes)}\n\n`);
-                }
-                res.writeHead(202, { 'Content-Type': 'text/plain' });
-                res.end('Accepted');
-              } else {
-                // Direct POST response
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(rpcRes));
+                } catch {}
               }
+
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(rpcRes || { jsonrpc: '2.0', id: null, result: {} }));
             } catch (err) {
               res.writeHead(400, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
