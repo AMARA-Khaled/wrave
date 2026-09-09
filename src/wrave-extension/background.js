@@ -317,7 +317,7 @@ async function handleCompanionCommand(cmd) {
         const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
         const results = await chrome.scripting.executeScript({
           target: { tabId },
-          func: (sel, text, clear) => {
+          func: (sel, text, clear, gatePasswords) => {
             let el = null;
             if (sel && sel.startsWith('@')) {
               el = document.querySelector(`[data-wrave-ref="${sel}"]`);
@@ -329,6 +329,17 @@ async function handleCompanionCommand(cmd) {
               el = document.querySelector('div[contenteditable="true"], div[role="textbox"], textarea, input[type="text"]');
             }
             if (!el) return { success: false, error: 'Input element not found' };
+
+            if (gatePasswords) {
+              const type = (el.getAttribute('type') || el.type || '').toLowerCase();
+              const auto = (el.getAttribute('autocomplete') || '').toLowerCase();
+              const name = (el.getAttribute('name') || '').toLowerCase();
+              const id = (el.id || '').toLowerCase();
+              if (type === 'password' || auto.includes('password') || name.includes('password') || id.includes('password')) {
+                return { success: false, error: 'Blocked: Sensitive password field interaction is protected by Wrave security settings.' };
+              }
+            }
+
             el.focus();
             if (el.isContentEditable) {
               if (clear) el.innerText = '';
@@ -341,7 +352,7 @@ async function handleCompanionCommand(cmd) {
             }
             return { success: true, textEntered: text };
           },
-          args: [params.selector || params.target || '', params.text || '', !!params.clear_first]
+          args: [params.selector || params.target || '', params.text || '', !!params.clear_first, !!settings.gatePasswords]
         });
         reply(results && results[0] ? results[0].result : { success: false });
         break;
@@ -351,7 +362,7 @@ async function handleCompanionCommand(cmd) {
         const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
         const results = await chrome.scripting.executeScript({
           target: { tabId },
-          func: (sel, text, clear, submitKey) => {
+          func: (sel, text, clear, submitKey, gatePasswords) => {
             let el = null;
             if (sel && sel.startsWith('@')) {
               el = document.querySelector(`[data-wrave-ref="${sel}"]`);
@@ -363,6 +374,17 @@ async function handleCompanionCommand(cmd) {
               el = document.querySelector('div[contenteditable="true"], div[role="textbox"], textarea, input[type="text"]');
             }
             if (!el) return { success: false, error: 'Input element not found' };
+
+            if (gatePasswords) {
+              const type = (el.getAttribute('type') || el.type || '').toLowerCase();
+              const auto = (el.getAttribute('autocomplete') || '').toLowerCase();
+              const name = (el.getAttribute('name') || '').toLowerCase();
+              const id = (el.id || '').toLowerCase();
+              if (type === 'password' || auto.includes('password') || name.includes('password') || id.includes('password')) {
+                return { success: false, error: 'Blocked: Sensitive password field interaction is protected by Wrave security settings.' };
+              }
+            }
+
             el.focus();
             if (el.isContentEditable) {
               if (clear) el.innerText = '';
@@ -381,7 +403,7 @@ async function handleCompanionCommand(cmd) {
             el.dispatchEvent(new KeyboardEvent('keyup', eventInit));
             return { success: true, textEntered: text, submittedKey: keyName };
           },
-          args: [params.selector || params.target || '', params.text || '', !!params.clear_first, params.submit_key || 'Enter']
+          args: [params.selector || params.target || '', params.text || '', !!params.clear_first, params.submit_key || 'Enter', !!settings.gatePasswords]
         });
         reply(results && results[0] ? results[0].result : { success: false });
         break;

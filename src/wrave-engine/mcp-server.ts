@@ -523,8 +523,37 @@ export class WraveMcpServer {
       this.server = http.createServer(async (req, res) => {
         const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
 
-        // CORS Headers
-        res.setHeader('Access-Control-Allow-Origin', '*');
+        const hostHeader = (req.headers.host || '').toLowerCase();
+        // 1. DNS Rebinding Protection: Host header MUST point to loopback/localhost
+        if (hostHeader && !hostHeader.startsWith('127.0.0.1') && !hostHeader.startsWith('localhost') && !hostHeader.startsWith('::1')) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Forbidden: Invalid Host header' }));
+          return;
+        }
+
+        // 2. Strict Origin / CORS Protection:
+        // Allow requests without Origin (CLI, Antigravity, Claude, curl) or from loopback / browser extensions.
+        // Block cross-origin requests originating from external browser webpages.
+        const origin = req.headers.origin;
+        if (origin) {
+          const isAllowedOrigin =
+            origin.startsWith('chrome-extension://') ||
+            origin.startsWith('moz-extension://') ||
+            origin.startsWith('http://127.0.0.1') ||
+            origin.startsWith('https://127.0.0.1') ||
+            origin.startsWith('http://localhost') ||
+            origin.startsWith('https://localhost');
+
+          if (!isAllowedOrigin) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Forbidden: Cross-origin access from external web pages is blocked.' }));
+            return;
+          }
+          res.setHeader('Access-Control-Allow-Origin', origin);
+        } else {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, x-session-id');
         res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Authorization, Mcp-Session-Id, mcp-session-id, x-session-id');
@@ -646,6 +675,28 @@ export class WraveMcpServer {
 
       this.server.on('upgrade', (req, socket, head) => {
         const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || this.host}`);
+        const wsHost = (req.headers.host || '').toLowerCase();
+        if (wsHost && !wsHost.startsWith('127.0.0.1') && !wsHost.startsWith('localhost') && !wsHost.startsWith('::1')) {
+          socket.destroy();
+          return;
+        }
+
+        const wsOrigin = (req.headers.origin || '').toLowerCase();
+        if (wsOrigin) {
+          const isAllowedWsOrigin =
+            wsOrigin.startsWith('chrome-extension://') ||
+            wsOrigin.startsWith('moz-extension://') ||
+            wsOrigin.startsWith('http://127.0.0.1') ||
+            wsOrigin.startsWith('https://127.0.0.1') ||
+            wsOrigin.startsWith('http://localhost') ||
+            wsOrigin.startsWith('https://localhost');
+
+          if (!isAllowedWsOrigin) {
+            socket.destroy();
+            return;
+          }
+        }
+
         if (parsedUrl.pathname === '/extension') {
           this.wss!.handleUpgrade(req, socket, head, (ws) => {
             this.extensionSocket = ws;
@@ -685,8 +736,34 @@ export class WraveMcpServer {
   startBridgeOnly(port = 8282, host = '127.0.0.1'): Promise<boolean> {
     return new Promise((resolve) => {
       this.server = http.createServer((req, res) => {
+        const hostHeader = (req.headers.host || '').toLowerCase();
+        if (hostHeader && !hostHeader.startsWith('127.0.0.1') && !hostHeader.startsWith('localhost') && !hostHeader.startsWith('::1')) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Forbidden: Invalid Host header' }));
+          return;
+        }
+
+        const origin = req.headers.origin;
+        if (origin) {
+          const isAllowedOrigin =
+            origin.startsWith('chrome-extension://') ||
+            origin.startsWith('moz-extension://') ||
+            origin.startsWith('http://127.0.0.1') ||
+            origin.startsWith('https://127.0.0.1') ||
+            origin.startsWith('http://localhost') ||
+            origin.startsWith('https://localhost');
+
+          if (!isAllowedOrigin) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Forbidden' }));
+            return;
+          }
+          res.setHeader('Access-Control-Allow-Origin', origin);
+        } else {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+
         const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || host}`);
-        res.setHeader('Access-Control-Allow-Origin', '*');
         if (parsedUrl.pathname === '/health') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ status: 'running', mode: 'stdio-bridge' }));
@@ -700,6 +777,28 @@ export class WraveMcpServer {
 
       this.server.on('upgrade', (req, socket, head) => {
         const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || host}`);
+        const wsHost = (req.headers.host || '').toLowerCase();
+        if (wsHost && !wsHost.startsWith('127.0.0.1') && !wsHost.startsWith('localhost') && !wsHost.startsWith('::1')) {
+          socket.destroy();
+          return;
+        }
+
+        const wsOrigin = (req.headers.origin || '').toLowerCase();
+        if (wsOrigin) {
+          const isAllowedWsOrigin =
+            wsOrigin.startsWith('chrome-extension://') ||
+            wsOrigin.startsWith('moz-extension://') ||
+            wsOrigin.startsWith('http://127.0.0.1') ||
+            wsOrigin.startsWith('https://127.0.0.1') ||
+            wsOrigin.startsWith('http://localhost') ||
+            wsOrigin.startsWith('https://localhost');
+
+          if (!isAllowedWsOrigin) {
+            socket.destroy();
+            return;
+          }
+        }
+
         if (parsedUrl.pathname === '/extension') {
           this.wss!.handleUpgrade(req, socket, head, (ws) => {
             this.extensionSocket = ws;

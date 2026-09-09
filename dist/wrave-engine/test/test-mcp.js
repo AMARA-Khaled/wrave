@@ -2,6 +2,7 @@
  * Automated Verification Suite for Wrave MCP & CDP Automation Engine (TypeScript)
  */
 import assert from 'node:assert';
+import http from 'node:http';
 import { WraveMcpServer } from '../mcp-server.js';
 async function runTestSuite() {
     console.log('🧪 Starting Wrave MCP Automated Test Suite...\n');
@@ -120,7 +121,41 @@ async function runTestSuite() {
         assert(respStr.includes('"id":42') || respStr.includes('"id": 42'), 'Expected RPC response id 42 on SSE stream');
         console.log('[PASS] MCP bidirectional SSE request/response cycle verified');
         controller.abort(); // Close stream
-        console.log('\n🎉 ALL WRAVE MCP INTEGRATION TESTS PASSED SUCCESSFULLY!\n');
+        // 6. Test Cross-Origin Protection (CORS block on external web origins)
+        const evilCorsRes = await fetch(`http://127.0.0.1:${testPort}/health`, {
+            headers: {
+                Authorization: `Bearer ${testToken}`,
+                Origin: 'https://malicious-site.com',
+            },
+        });
+        assert.strictEqual(evilCorsRes.status, 403, 'Expected 403 Forbidden when external web origin tries to access MCP server');
+        console.log('[PASS] Cross-Origin Protection verified (403 on external web origins)');
+        // 7. Test Extension / Local Origin allowance
+        const extCorsRes = await fetch(`http://127.0.0.1:${testPort}/health`, {
+            headers: {
+                Authorization: `Bearer ${testToken}`,
+                Origin: 'chrome-extension://nclefkjmjjpdanmpmhdghbnhlihffnno',
+            },
+        });
+        assert.strictEqual(extCorsRes.status, 200, 'Expected 200 OK for chrome-extension origin');
+        console.log('[PASS] Trusted extension origin allowance verified (200 for chrome-extension://)');
+        // 8. Test DNS Rebinding Protection (raw Host header spoofing rejected with 403)
+        const rawStatus = await new Promise((resolve, reject) => {
+            const r = http.request({
+                host: '127.0.0.1',
+                port: testPort,
+                path: '/health',
+                headers: {
+                    Authorization: `Bearer ${testToken}`,
+                    Host: 'evil-attacker.com',
+                },
+            }, (res) => resolve(res.statusCode || 0));
+            r.on('error', reject);
+            r.end();
+        });
+        assert.strictEqual(rawStatus, 403, 'Expected 403 Forbidden on invalid Host header');
+        console.log('[PASS] DNS Rebinding Protection verified (403 on invalid Host header)');
+        console.log('\n🎉 ALL WRAVE MCP INTEGRATION & SECURITY TESTS PASSED SUCCESSFULLY!\n');
     }
     finally {
         server.stop();
