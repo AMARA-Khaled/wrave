@@ -321,6 +321,38 @@ async function handleCompanionCommand(cmd) {
         break;
       }
 
+      case 'page_scroll': {
+        const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (sel, dx, dy) => {
+            let el = null;
+            if (sel) {
+              try { el = document.querySelector(sel); } catch {}
+            }
+            if (!el) {
+              const elements = Array.from(document.querySelectorAll('div, section, main, ul'));
+              for (const e of elements) {
+                const style = window.getComputedStyle(e);
+                if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && e.scrollHeight > e.clientHeight) {
+                  el = e;
+                  break;
+                }
+              }
+            }
+            if (el) {
+              el.scrollTop += (dy || 300);
+              return { success: true, scrolledElement: true, scrollTop: el.scrollTop };
+            }
+            window.scrollBy(dx || 0, dy || 300);
+            return { success: true, scrolledWindow: true };
+          },
+          args: [params.selector || '', params.deltaX || 0, params.deltaY || 300]
+        });
+        reply(results && results[0] ? results[0].result : { success: false });
+        break;
+      }
+
       case 'page_get_cookies': {
         if (!settings.allowCookies) {
           return reply(null, 'Cookie access is disabled in Wrave security settings.');

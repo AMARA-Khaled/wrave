@@ -32,14 +32,20 @@ export class WraveCdpEngine {
   }
 
   async isCdpAvailable() {
+    const now = Date.now();
+    if (this._cdpCacheTime && (now - this._cdpCacheTime < 10000)) {
+      return this._cdpAvailableCache;
+    }
     try {
       const res = await fetch(`${this.cdpBaseUrl}/json/version`, {
-        signal: AbortSignal.timeout(1500),
+        signal: AbortSignal.timeout(150),
       });
-      return res.ok;
+      this._cdpAvailableCache = res.ok;
     } catch {
-      return false;
+      this._cdpAvailableCache = false;
     }
+    this._cdpCacheTime = now;
+    return this._cdpAvailableCache;
   }
 
   async getVersionInfo() {

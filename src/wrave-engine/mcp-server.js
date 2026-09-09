@@ -353,6 +353,8 @@ export class WraveMcpServer {
           return await this.sendBridgeCommand('page_type_text', { tabId: args.tab_id, selector: args.selector || '', text: args.text || '', clear_first: !!args.clear_first });
         case 'wrave_press_key':
           return await this.sendBridgeCommand('page_press_key', { tabId: args.tab_id, key: args.key });
+        case 'wrave_scroll_page':
+          return await this.sendBridgeCommand('page_scroll', { tabId: args.tab_id, deltaX: args.delta_x || 0, deltaY: args.delta_y || 300 });
         case 'wrave_execute_script':
           return await this.sendBridgeCommand('page_execute_js', { tabId: args.tab_id, script: args.script });
         case 'wrave_get_cookies':
