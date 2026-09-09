@@ -15,8 +15,9 @@ import { WraveCdpEngine } from './cdp-engine.js';
 
 function parseArgs() {
   const args = process.argv.slice(2);
+  const isPipe = !process.stdin.isTTY;
   const options = {
-    mode: 'server', // 'server' | 'stdio'
+    mode: isPipe ? 'stdio' : 'server', // stdio if spawned by AI harness, server if run interactively in terminal
     port: 8282,
     host: '127.0.0.1',
     cdpPort: 9222,

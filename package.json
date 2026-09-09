@@ -3,19 +3,40 @@
   "version": "1.1.0",
   "description": "Wrave - AI-Native Model Context Protocol (MCP) Gateway for Brave Browser",
   "type": "module",
+  "main": "src/wrave-engine/cli.js",
+  "bin": {
+    "wrave": "./src/wrave-engine/cli.js",
+    "wrave-mcp": "./src/wrave-engine/cli.js"
+  },
+  "files": [
+    "src/wrave-engine/",
+    "src/wrave-extension/",
+    "dist/wrave-extension-v1.1.0.zip",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node src/wrave-engine/cli.js --server",
     "stdio": "node src/wrave-engine/cli.js --stdio",
     "pack:extension": "powershell -Command \"New-Item -ItemType Directory -Path dist -Force | Out-Null; Compress-Archive -Path src/wrave-extension/* -DestinationPath dist/wrave-extension-v1.1.0.zip -Force\"",
     "test": "node src/wrave-engine/test/test-mcp.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AMARA-Khaled/wrave.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AMARA-Khaled/wrave/issues"
+  },
+  "homepage": "https://github.com/AMARA-Khaled/wrave#readme",
   "keywords": [
     "mcp",
     "model-context-protocol",
     "brave",
     "browser-automation",
-    "claude-code",
+    "claude-desktop",
     "antigravity",
+    "cursor",
     "ai-agent"
   ],
   "author": "AMARA-Khaled",

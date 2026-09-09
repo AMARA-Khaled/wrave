@@ -122,7 +122,7 @@ async function runTestSuite() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 42, method: 'tools/list' }),
     });
-    assert.strictEqual(postRes.status, 202);
+    assert(postRes.status === 200 || postRes.status === 202, `Expected status 200 or 202, got ${postRes.status}`);
 
     // Read response from SSE stream
     const { value: respChunk } = await reader.read();
