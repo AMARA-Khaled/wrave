@@ -39,39 +39,44 @@ Wrave gives AI coding assistants real-time, bidirectional control over your Brav
 
 ---
 
-### Step 2: Connect Claude Code (Stdio Mode)
+### Step 2: Connect via npm / npx (Zero Setup)
 
-In your terminal or workspace, simply run:
+Wrave can be spawned automatically by any MCP-compliant AI client on demand without keeping a background server running.
 
-```bash
-claude mcp add wrave -- node "C:\Users\walid\Desktop\weed\wrave\src\wrave-engine\cli.js" --stdio
+#### For Claude Desktop / Cursor / Antigravity (Stdio Mode):
+Add to your `claude_desktop_config.json` or `mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "wrave": {
+      "command": "npx",
+      "args": ["-y", "wrave-mcp"]
+    }
+  }
+}
 ```
 
-*Claude Code will automatically spin up the Wrave MCP engine on demand whenever browser tools are needed.*
+*The AI client will automatically launch the Wrave MCP engine on demand whenever browser tools are needed and cleanly shut it down when the session ends.*
 
 ---
 
-### Step 3: Connect via HTTP/SSE Server (Port 8282)
+### Step 3: Connect via Persistent Local Server (Port 8282)
 
-If you prefer running a persistent local server:
+If you prefer running a persistent local server (like Figma Dev Mode):
 
 1. Start the Wrave engine:
    ```bash
-   npm start
-   # or: node src/wrave-engine/cli.js --server --port 8282
+   npx wrave-mcp --server
+   # or locally: npm start
    ```
 
-2. Add to Claude Code or Antigravity:
-   ```bash
-   claude mcp add wrave -- http://127.0.0.1:8282/mcp/sse
-   ```
-
-3. Or add to your `mcpServers` configuration (`claude_desktop_config.json` / `agy.json`):
+2. Add to your AI client configuration:
    ```json
    {
      "mcpServers": {
        "wrave": {
-         "url": "http://127.0.0.1:8282/mcp/sse"
+         "serverUrl": "http://127.0.0.1:8282/mcp"
        }
      }
    }
