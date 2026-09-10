@@ -12,7 +12,7 @@
   "files": [
     "dist/wrave-engine/",
     "src/wrave-extension/",
-    "dist/wrave-extension-v1.2.0.zip",
+    "dist/wrave-extension-v1.2.1.zip",
     "README.md",
     "LICENSE"
   ],
@@ -21,7 +21,7 @@
     "watch": "tsc --watch",
     "start": "node dist/wrave-engine/cli.js --server",
     "stdio": "node dist/wrave-engine/cli.js --stdio",
-    "pack:extension": "powershell -Command \"New-Item -ItemType Directory -Path dist -Force | Out-Null; Compress-Archive -Path src/wrave-extension/* -DestinationPath dist/wrave-extension-v1.2.0.zip -Force\"",
+    "pack:extension": "powershell -Command \"New-Item -ItemType Directory -Path dist -Force | Out-Null; Compress-Archive -Path src/wrave-extension/* -DestinationPath dist/wrave-extension-v1.2.1.zip -Force\"",
     "test": "npm run build && node dist/wrave-engine/test/test-mcp.js",
     "prepublishOnly": "npm run build && npm test && npm run pack:extension"
   },

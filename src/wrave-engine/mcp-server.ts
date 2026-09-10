@@ -451,7 +451,7 @@ export class WraveMcpServer {
           },
           serverInfo: {
             name: 'wrave-mcp-server',
-            version: '1.2.0',
+            version: '1.2.1',
           },
         },
       };
@@ -617,7 +617,7 @@ export class WraveMcpServer {
           res.end(JSON.stringify({
             status: 'running',
             name: 'wrave-mcp-server',
-            version: '1.2.0',
+            version: '1.2.1',
             securityMode: this.cdpEngine?.securityMode || 'ask_validation',
             cdpConnected: cdpAvailable,
             extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === WebSocket.OPEN),

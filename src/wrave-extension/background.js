@@ -73,7 +73,7 @@ async function initBridge() {
           ws.send(JSON.stringify({
             type: 'register',
             client: 'brave-extension',
-            version: '1.2.0'
+            version: '1.2.1'
           }));
         }
       } catch (sendErr) {
