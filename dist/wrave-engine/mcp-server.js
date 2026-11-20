@@ -6,9 +6,26 @@
  */
 import http from 'node:http';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { URL } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
-import { WraveCdpEngine } from './cdp-engine.js';
+import { WraveCdpEngine, normalizeUrl } from './cdp-engine.js';
+import { getToolsDefinition, formatSnapshot, SERVER_INSTRUCTIONS } from './tool-definitions.js';
+/** Compact (non-indented) serialization: indentation alone roughly doubles token cost. */
+function compact(value) {
+    if (typeof value === 'string')
+        return value;
+    if (value === undefined)
+        return 'undefined';
+    try {
+        return JSON.stringify(value) ?? String(value);
+    }
+    catch {
+        return String(value);
+    }
+}
 export class WraveMcpServer {
     port;
     host;
@@ -21,6 +38,8 @@ export class WraveMcpServer {
     extensionSocket = null;
     pendingBridgeRequests;
     bridgeMessageId = 1;
+    lastCdpTabId = null;
+    lastBridgeTabId = null;
     constructor(options = {}) {
         this.port = options.port || 8282;
         this.host = options.host || '127.0.0.1';
@@ -31,262 +50,9 @@ export class WraveMcpServer {
         this.pendingBridgeRequests = new Map();
     }
     getToolsDefinition() {
-        return [
-            {
-                name: 'wrave_list_tabs',
-                description: 'List all open tabs in Brave, including tab ID, URL, title, and active state.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {},
-                },
-            },
-            {
-                name: 'wrave_open_tab',
-                description: 'Open a new tab with the specified URL.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        url: { type: 'string', description: 'URL to open' },
-                        activate: { type: 'boolean', default: true, description: 'Bring tab to foreground' },
-                    },
-                    required: ['url'],
-                },
-            },
-            {
-                name: 'wrave_close_tab',
-                description: 'Close an open tab by its ID.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab to close' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_focus_tab',
-                description: 'Bring a tab to the foreground and activate it.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab to focus' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_reload_tab',
-                description: 'Reload the specified tab.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab to reload' },
-                        ignore_cache: { type: 'boolean', default: false },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_get_tab_state',
-                description: 'Read the active tab state including title, URL, viewport dimensions, and scroll offset.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_get_dom_tree',
-                description: 'Extract clean, LLM-friendly DOM tree with bounding boxes [x, y, w, h] and interactive element metadata.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        max_depth: { type: 'number', default: 4, description: 'Max tree nesting depth' },
-                        html: { type: 'boolean', default: false, description: 'Return full HTML if true' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_get_accessibility_tree',
-                description: 'Extract the full accessibility tree (AXTree) for semantic screen-reader level inspection.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_take_screenshot',
-                description: 'Capture a screenshot of the tab viewport or full page as base64 PNG/JPEG.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        full_page: { type: 'boolean', default: false },
-                        format: { type: 'string', enum: ['png', 'jpeg'], default: 'png' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_click',
-                description: 'Dispatch mouse click to element selector or pixel coordinates.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        selector: { type: 'string', description: 'CSS selector of the target element' },
-                        x: { type: 'number', description: 'Optional explicit X coordinate' },
-                        y: { type: 'number', description: 'Optional explicit Y coordinate' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_double_click',
-                description: 'Dispatch double-click event to element selector or coordinates.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        selector: { type: 'string', description: 'CSS selector of the target element' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_type_text',
-                description: 'Type text into an input or textarea.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        selector: { type: 'string', description: 'CSS selector of the input element' },
-                        text: { type: 'string', description: 'Text string to type' },
-                        clear_first: { type: 'boolean', default: false, description: 'Clear existing text first' },
-                    },
-                    required: ['tab_id', 'text'],
-                },
-            },
-            {
-                name: 'wrave_press_key',
-                description: 'Send a keyboard key press (e.g. Enter, Escape, Tab, Backspace).',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        key: { type: 'string', description: 'Key name (Enter, Tab, Escape, etc.)' },
-                    },
-                    required: ['tab_id', 'key'],
-                },
-            },
-            {
-                name: 'wrave_scroll_page',
-                description: 'Scroll the active tab viewport by deltaX and deltaY.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        delta_y: { type: 'number', default: 300, description: 'Vertical scroll amount' },
-                        delta_x: { type: 'number', default: 0, description: 'Horizontal scroll amount' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_execute_script',
-                description: 'Execute arbitrary JavaScript expression in the tab context.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        script: { type: 'string', description: 'JavaScript code to evaluate' },
-                    },
-                    required: ['tab_id', 'script'],
-                },
-            },
-            {
-                name: 'wrave_get_cookies',
-                description: 'Retrieve cookies for the tab or domain.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_print_to_pdf',
-                description: 'Export the current page as a PDF document.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_get_console_logs',
-                description: 'Retrieve intercepted console logs for the tab.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_get_snapshot',
-                description: 'Instant page snapshot with indexed interactive elements (@1, @2, etc.), title, and URL.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_click_and_read',
-                description: 'Click an element (by selector, @ref like @1, or x/y) and immediately return the updated page snapshot in 1 turn.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        selector: { type: 'string', description: 'CSS selector or @ref (e.g. @1, @4) to click' },
-                        x: { type: 'number', description: 'Optional explicit X coordinate' },
-                        y: { type: 'number', description: 'Optional explicit Y coordinate' },
-                    },
-                    required: ['tab_id'],
-                },
-            },
-            {
-                name: 'wrave_type_and_submit',
-                description: 'Type text into an input or contenteditable field and submit with Enter key in 1 turn.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tab_id: { type: 'string', description: 'The ID of the tab' },
-                        selector: { type: 'string', description: 'CSS selector or @ref (e.g. @1, @2) of the input element' },
-                        text: { type: 'string', description: 'The text to type' },
-                        clear_first: { type: 'boolean', default: false, description: 'Clear existing text before typing' },
-                        submit_key: { type: 'string', default: 'Enter', description: 'Key to send after typing (default Enter)' },
-                    },
-                    required: ['tab_id', 'selector', 'text'],
-                },
-            },
-        ];
+        return getToolsDefinition();
     }
-    async sendBridgeCommand(method, params = {}, timeoutMs = 8000) {
+    async sendBridgeCommand(method, params = {}, timeoutMs = 15000) {
         if (!this.extensionSocket || this.extensionSocket.readyState !== WebSocket.OPEN) {
             throw new Error('Extension bridge is not connected.');
         }
@@ -303,114 +69,276 @@ export class WraveMcpServer {
             this.extensionSocket.send(JSON.stringify({ id, method, params }));
         });
     }
+    /**
+     * Resolve the tab a tool call targets. An explicit tab_id becomes the new default;
+     * otherwise the last used tab is reused, falling back to the most recent page tab.
+     */
+    async resolveCdpTab(args) {
+        if (args.tab_id !== undefined && args.tab_id !== null && args.tab_id !== '') {
+            this.lastCdpTabId = String(args.tab_id);
+            return this.lastCdpTabId;
+        }
+        if (this.lastCdpTabId && this.cdpEngine.hasLiveSession(this.lastCdpTabId))
+            return this.lastCdpTabId;
+        const tabs = await this.cdpEngine.listTabs();
+        if (this.lastCdpTabId && tabs.some((t) => t.id === this.lastCdpTabId))
+            return this.lastCdpTabId;
+        const page = tabs.find((t) => /^https?:|^file:/.test(t.url)) || tabs[0];
+        if (!page)
+            throw new Error('No open tabs. Use wrave_open_tab first.');
+        this.lastCdpTabId = String(page.id);
+        return this.lastCdpTabId;
+    }
     async handleMcpToolCall(name, args = {}, _callerName = 'AI Harness') {
-        const cdpReady = await this.cdpEngine.isCdpAvailable();
-        // 1. Direct CDP Execution (Primary)
-        if (cdpReady) {
-            switch (name) {
-                case 'wrave_list_tabs':
-                    return await this.cdpEngine.listTabs();
-                case 'wrave_open_tab':
-                    return await this.cdpEngine.openTab(args.url, args.activate !== false);
-                case 'wrave_close_tab':
-                    return await this.cdpEngine.closeTab(args.tab_id);
-                case 'wrave_focus_tab':
-                    return await this.cdpEngine.focusTab(args.tab_id);
-                case 'wrave_reload_tab':
-                    return await this.cdpEngine.reloadTab(args.tab_id, args.ignore_cache);
-                case 'wrave_get_tab_state':
-                    return await this.cdpEngine.getTabState(args.tab_id);
-                case 'wrave_get_dom_tree':
-                    return await this.cdpEngine.getDomTree(args.tab_id, args.max_depth || 4);
-                case 'wrave_get_accessibility_tree':
-                    return await this.cdpEngine.getAccessibilityTree(args.tab_id);
-                case 'wrave_take_screenshot': {
-                    const shot = await this.cdpEngine.takeScreenshot(args.tab_id, args.format || 'png', 80, args.full_page || false);
-                    return {
-                        _isImage: true,
-                        mimeType: `image/${shot.format}`,
-                        data: shot.dataBase64,
-                    };
-                }
-                case 'wrave_click': {
-                    const target = (args.x !== undefined && args.y !== undefined) ? { x: args.x, y: args.y } : args.selector;
-                    return await this.cdpEngine.click(args.tab_id, target);
-                }
-                case 'wrave_double_click':
-                    return await this.cdpEngine.doubleClick(args.tab_id, args.selector);
-                case 'wrave_type_text':
-                    return await this.cdpEngine.typeText(args.tab_id, args.selector, args.text, args.clear_first);
-                case 'wrave_press_key':
-                    return await this.cdpEngine.pressKey(args.tab_id, args.key);
-                case 'wrave_scroll_page':
-                    return await this.cdpEngine.scrollPage(args.tab_id, args.delta_x || 0, args.delta_y || 300);
-                case 'wrave_execute_script':
-                    return await this.cdpEngine.executeScript(args.tab_id, args.script);
-                case 'wrave_get_cookies':
-                    return await this.cdpEngine.getCookies(args.tab_id);
-                case 'wrave_print_to_pdf':
-                    return await this.cdpEngine.printToPdf(args.tab_id);
-                case 'wrave_get_console_logs':
-                    return await this.cdpEngine.getConsoleLogs(args.tab_id);
-                case 'wrave_get_snapshot':
-                    return await this.cdpEngine.getSnapshot(args.tab_id);
-                case 'wrave_click_and_read': {
-                    const target = (args.x !== undefined && args.y !== undefined) ? { x: args.x, y: args.y } : args.selector;
-                    return await this.cdpEngine.clickAndRead(args.tab_id, target);
-                }
-                case 'wrave_type_and_submit':
-                    return await this.cdpEngine.typeAndSubmit(args.tab_id, args.selector, args.text, args.clear_first, args.submit_key || 'Enter');
+        if (name === 'wrave_batch')
+            return this.runBatch(args);
+        if (await this.cdpEngine.isCdpAvailable()) {
+            try {
+                return await this.callCdpTool(name, args);
+            }
+            catch (err) {
+                if (/fetch failed|ECONNREFUSED|socket hang up/i.test(err.message || ''))
+                    this.cdpEngine.invalidateAvailability();
+                throw err;
             }
         }
-        // 2. Extension Bridge Fallback (When CDP port 9222 is not active)
         if (this.extensionSocket && this.extensionSocket.readyState === WebSocket.OPEN) {
-            switch (name) {
-                case 'wrave_list_tabs':
-                    return await this.sendBridgeCommand('tabs_list');
-                case 'wrave_open_tab':
-                    return await this.sendBridgeCommand('tab_create', { url: args.url, active: args.activate !== false });
-                case 'wrave_close_tab':
-                    return await this.sendBridgeCommand('tab_close', { tabId: args.tab_id });
-                case 'wrave_focus_tab':
-                    return await this.sendBridgeCommand('tab_activate', { tabId: args.tab_id });
-                case 'wrave_reload_tab':
-                    return await this.sendBridgeCommand('tab_reload', { tabId: args.tab_id, ignore_cache: args.ignore_cache });
-                case 'wrave_get_tab_state':
-                    return await this.sendBridgeCommand('tab_get_state', { tabId: args.tab_id });
-                case 'wrave_take_screenshot': {
-                    const shot = await this.sendBridgeCommand('page_screenshot', { tabId: args.tab_id, format: args.format || 'png' });
-                    const dataBase64 = shot.dataUrl ? shot.dataUrl.replace(/^data:image\/\w+;base64,/, '') : (shot.dataBase64 || '');
-                    return {
-                        _isImage: true,
-                        mimeType: `image/${args.format || 'png'}`,
-                        data: dataBase64,
-                    };
-                }
-                case 'wrave_get_dom_tree':
-                    return await this.sendBridgeCommand('page_get_dom', { tabId: args.tab_id, html: !!args.html });
-                case 'wrave_get_snapshot':
-                    return await this.sendBridgeCommand('page_get_snapshot', { tabId: args.tab_id });
-                case 'wrave_click':
-                    return await this.sendBridgeCommand('page_click', { tabId: args.tab_id, selector: args.selector || '', x: args.x, y: args.y });
-                case 'wrave_click_and_read':
-                    return await this.sendBridgeCommand('page_click_and_read', { tabId: args.tab_id, selector: args.selector || '', x: args.x, y: args.y });
-                case 'wrave_type_text':
-                    return await this.sendBridgeCommand('page_type_text', { tabId: args.tab_id, selector: args.selector || '', text: args.text || '', clear_first: !!args.clear_first });
-                case 'wrave_type_and_submit':
-                    return await this.sendBridgeCommand('page_type_and_submit', { tabId: args.tab_id, selector: args.selector || '', text: args.text || '', clear_first: !!args.clear_first, submit_key: args.submit_key || 'Enter' });
-                case 'wrave_press_key':
-                    return await this.sendBridgeCommand('page_press_key', { tabId: args.tab_id, key: args.key });
-                case 'wrave_scroll_page':
-                    return await this.sendBridgeCommand('page_scroll', { tabId: args.tab_id, deltaX: args.delta_x || 0, deltaY: args.delta_y || 300 });
-                case 'wrave_execute_script':
-                    return await this.sendBridgeCommand('page_execute_js', { tabId: args.tab_id, script: args.script });
-                case 'wrave_get_cookies':
-                    return await this.sendBridgeCommand('page_get_cookies', { tabId: args.tab_id });
-                default:
-                    throw new Error(`Tool "${name}" requires Chrome DevTools Protocol. Launch Brave with --remote-debugging-port=9222 for full tool access.`);
-            }
+            return this.callBridgeTool(name, args);
         }
         throw new Error('Brave is not connected. Either start Brave with --remote-debugging-port=9222 or open Brave with the Wrave Extension loaded.');
+    }
+    snapshotOpts(args) {
+        return {
+            maxElements: args.max_elements,
+            viewportOnly: args.viewport_only,
+            dismissDialogs: args.dismiss_popups,
+        };
+    }
+    /** Appends a formatted snapshot to an action result when requested. */
+    async withSnapshot(tabId, result, args, defaultOn) {
+        const want = args.snapshot ?? defaultOn;
+        if (!want)
+            return result;
+        const snap = await this.cdpEngine.getSnapshot(tabId, this.snapshotOpts(args));
+        return `${compact(result)}\n${formatSnapshot(snap)}`;
+    }
+    async callCdpTool(name, args) {
+        const e = this.cdpEngine;
+        const target = () => (args.x !== undefined && args.y !== undefined ? { x: args.x, y: args.y } : args.selector);
+        switch (name) {
+            case 'wrave_list_tabs': {
+                const tabs = await e.listTabs();
+                return tabs.map((t) => ({ ...t, ...(t.id === this.lastCdpTabId ? { default: true } : {}) }));
+            }
+            case 'wrave_open_tab': {
+                const tab = await e.openTab(args.url, args.activate !== false);
+                this.lastCdpTabId = tab.id;
+                return this.withSnapshot(tab.id, { tab_id: tab.id, status: 'opened' }, args, true);
+            }
+            case 'wrave_close_tab': {
+                const res = await e.closeTab(String(args.tab_id));
+                if (this.lastCdpTabId === String(args.tab_id))
+                    this.lastCdpTabId = null;
+                return res;
+            }
+            case 'wrave_focus_tab':
+                this.lastCdpTabId = String(args.tab_id);
+                return await e.focusTab(this.lastCdpTabId);
+        }
+        const tabId = await this.resolveCdpTab(args);
+        switch (name) {
+            case 'wrave_navigate': {
+                let res;
+                if (args.action === 'back')
+                    res = await e.goHistory(tabId, -1, args.timeout_ms);
+                else if (args.action === 'forward')
+                    res = await e.goHistory(tabId, 1, args.timeout_ms);
+                else if (args.action === 'reload')
+                    res = await e.reloadTab(tabId);
+                else if (args.url)
+                    res = await e.navigate(tabId, args.url, args.timeout_ms || 15000);
+                else
+                    throw new Error('Provide url or action (back | forward | reload).');
+                return this.withSnapshot(tabId, res, args, true);
+            }
+            case 'wrave_reload_tab':
+                return await e.reloadTab(tabId, args.ignore_cache);
+            case 'wrave_get_tab_state':
+                return await e.getTabState(tabId);
+            case 'wrave_get_snapshot':
+                return formatSnapshot(await e.getSnapshot(tabId, this.snapshotOpts(args)), !!args.include_boxes);
+            case 'wrave_get_text': {
+                const r = await e.getText(tabId, args.selector, args.max_chars);
+                return `Page: ${r.title}\nURL: ${r.url}\n\n${r.text}${r.truncated ? `\n\n[truncated at ${args.max_chars || 8000} chars; pass a larger max_chars or a selector]` : ''}`;
+            }
+            case 'wrave_get_dom_tree':
+                return await e.getDomTree(tabId, args.max_depth || 4);
+            case 'wrave_get_accessibility_tree':
+                return await e.getAccessibilityTree(tabId, args.max_nodes || 400);
+            case 'wrave_take_screenshot': {
+                const format = args.format === 'png' ? 'png' : 'jpeg';
+                const shot = await e.takeScreenshot(tabId, format, args.quality || 70, !!args.full_page);
+                return { _isImage: true, mimeType: `image/${shot.format}`, data: shot.dataBase64 };
+            }
+            case 'wrave_click': {
+                const res = await e.click(tabId, target());
+                res.wait = await e.waitForIdle(tabId);
+                return this.withSnapshot(tabId, res, args, false);
+            }
+            case 'wrave_click_and_read':
+                return formatSnapshot(await e.clickAndRead(tabId, target(), this.snapshotOpts(args)));
+            case 'wrave_double_click':
+                return await e.doubleClick(tabId, target());
+            case 'wrave_hover':
+                return await e.hover(tabId, target());
+            case 'wrave_type_text':
+                return await e.typeText(tabId, args.selector, String(args.text ?? ''), !!args.clear_first);
+            case 'wrave_type_and_submit': {
+                const res = await e.typeAndSubmit(tabId, args.selector, String(args.text ?? ''), args.clear_first !== false, args.submit_key || 'Enter');
+                return this.withSnapshot(tabId, res, args, false);
+            }
+            case 'wrave_press_key': {
+                const n = Math.min(Math.max(1, Number(args.repeat) || 1), 100);
+                for (let i = 0; i < n; i++)
+                    await e.pressKey(tabId, args.key);
+                return { key: args.key, times: n, status: 'pressed' };
+            }
+            case 'wrave_select_option':
+                return await e.selectOption(tabId, args.selector, args.value);
+            case 'wrave_fill_form': {
+                const res = await e.fillForm(tabId, args.fields, args.submit);
+                return this.withSnapshot(tabId, res, args, false);
+            }
+            case 'wrave_scroll_page':
+                return await e.scrollPage(tabId, { deltaX: args.delta_x, deltaY: args.delta_y, selector: args.selector, to: args.to });
+            case 'wrave_wait_for':
+                return await e.waitFor(tabId, { selector: args.selector, text: args.text, gone: !!args.gone, timeoutMs: args.timeout_ms });
+            case 'wrave_execute_script':
+                return await e.executeScript(tabId, args.script);
+            case 'wrave_get_cookies':
+                return await e.getCookies(tabId);
+            case 'wrave_print_to_pdf': {
+                const pdf = await e.printToPdf(tabId);
+                const outPath = args.path || path.join(os.tmpdir(), `wrave-${tabId.slice(0, 8)}-${Date.now()}.pdf`);
+                await fs.promises.writeFile(outPath, Buffer.from(pdf.dataBase64, 'base64'));
+                return { status: 'saved', path: outPath, bytes: Buffer.byteLength(pdf.dataBase64, 'base64') };
+            }
+            case 'wrave_get_console_logs':
+                return await e.getConsoleLogs(tabId, !!args.clear);
+            default:
+                throw new Error(`Unknown tool "${name}".`);
+        }
+    }
+    async callBridgeTool(name, args) {
+        if (args.tab_id !== undefined && args.tab_id !== null && args.tab_id !== '')
+            this.lastBridgeTabId = args.tab_id;
+        const tabId = args.tab_id ?? this.lastBridgeTabId ?? undefined;
+        const target = { selector: args.selector || '', x: args.x, y: args.y };
+        switch (name) {
+            case 'wrave_list_tabs':
+                return await this.sendBridgeCommand('tabs_list');
+            case 'wrave_open_tab': {
+                const res = await this.sendBridgeCommand('tab_create', { url: normalizeUrl(args.url), active: args.activate !== false });
+                if (res && res.tabId !== undefined)
+                    this.lastBridgeTabId = res.tabId;
+                return `${compact({ tab_id: res.tabId, status: 'opened' })}\n${formatSnapshot(res)}`;
+            }
+            case 'wrave_navigate': {
+                if (!args.url)
+                    throw new Error('Extension mode supports wrave_navigate with a url only. Launch Brave with --remote-debugging-port=9222 for back/forward.');
+                const res = await this.sendBridgeCommand('page_navigate', { tabId, url: normalizeUrl(args.url) }, 20000);
+                return res && res.elements ? formatSnapshot(res) : res;
+            }
+            case 'wrave_close_tab':
+                if (this.lastBridgeTabId === args.tab_id)
+                    this.lastBridgeTabId = null;
+                return await this.sendBridgeCommand('tab_close', { tabId: args.tab_id });
+            case 'wrave_focus_tab':
+                return await this.sendBridgeCommand('tab_activate', { tabId: args.tab_id });
+            case 'wrave_reload_tab':
+                return await this.sendBridgeCommand('tab_reload', { tabId, ignore_cache: args.ignore_cache });
+            case 'wrave_get_tab_state':
+                return await this.sendBridgeCommand('tab_get_state', { tabId });
+            case 'wrave_take_screenshot': {
+                const format = args.format === 'png' ? 'png' : 'jpeg';
+                const shot = await this.sendBridgeCommand('page_screenshot', { tabId, format });
+                const dataBase64 = shot.dataUrl ? shot.dataUrl.replace(/^data:image\/\w+;base64,/, '') : (shot.dataBase64 || '');
+                return { _isImage: true, mimeType: `image/${format}`, data: dataBase64 };
+            }
+            case 'wrave_get_dom_tree':
+                return await this.sendBridgeCommand('page_get_dom', { tabId, html: !!args.html });
+            case 'wrave_get_text': {
+                const res = await this.sendBridgeCommand('page_get_dom', { tabId, html: false });
+                const max = args.max_chars || 8000;
+                const text = String(res?.content || '').replace(/\n\s*\n+/g, '\n').trim();
+                return text.length > max ? `${text.slice(0, max)}\n\n[truncated at ${max} chars]` : text;
+            }
+            case 'wrave_get_snapshot':
+                return formatSnapshot(await this.sendBridgeCommand('page_get_snapshot', { tabId }), !!args.include_boxes);
+            case 'wrave_click':
+                return await this.sendBridgeCommand('page_click', { tabId, ...target });
+            case 'wrave_click_and_read':
+                return formatSnapshot(await this.sendBridgeCommand('page_click_and_read', { tabId, ...target }));
+            case 'wrave_type_text':
+                return await this.sendBridgeCommand('page_type_text', { tabId, selector: args.selector || '', text: args.text || '', clear_first: !!args.clear_first });
+            case 'wrave_type_and_submit':
+                return await this.sendBridgeCommand('page_type_and_submit', { tabId, selector: args.selector || '', text: args.text || '', clear_first: args.clear_first !== false, submit_key: args.submit_key || 'Enter' });
+            case 'wrave_press_key':
+                return await this.sendBridgeCommand('page_press_key', { tabId, key: args.key });
+            case 'wrave_scroll_page':
+                return await this.sendBridgeCommand('page_scroll', { tabId, selector: args.selector, deltaX: args.delta_x || 0, deltaY: args.delta_y ?? 600 });
+            case 'wrave_execute_script':
+                return await this.sendBridgeCommand('page_execute_js', { tabId, script: args.script });
+            case 'wrave_get_cookies':
+                return await this.sendBridgeCommand('page_get_cookies', { tabId });
+            default:
+                throw new Error(`Tool "${name}" requires Chrome DevTools Protocol. Launch Brave with --remote-debugging-port=9222 for full tool access.`);
+        }
+    }
+    /** Runs several tool calls sequentially inside one MCP round trip. */
+    async runBatch(args) {
+        const steps = args.steps;
+        if (!Array.isArray(steps) || steps.length === 0)
+            throw new Error('steps must be a non-empty array of {tool, args}.');
+        if (steps.length > 50)
+            throw new Error('A batch can contain at most 50 steps.');
+        const lines = [];
+        let failed = false;
+        const started = Date.now();
+        for (let i = 0; i < steps.length; i++) {
+            const step = steps[i] || {};
+            const tool = String(step.tool || step.name || '');
+            const stepArgs = { ...(step.args || step.arguments || {}) };
+            if (stepArgs.tab_id === undefined && args.tab_id !== undefined)
+                stepArgs.tab_id = args.tab_id;
+            try {
+                if (tool === 'wrave_batch')
+                    throw new Error('Nested batches are not allowed.');
+                const res = await this.handleMcpToolCall(tool, stepArgs);
+                const rendered = res && res._isImage ? '(image omitted inside batch; call wrave_take_screenshot directly)' : compact(res);
+                lines.push(`[${i + 1}] ${tool}: ${rendered}`);
+            }
+            catch (err) {
+                failed = true;
+                lines.push(`[${i + 1}] ${tool}: ERROR ${err.message}`);
+                if (args.stop_on_error !== false) {
+                    if (i < steps.length - 1)
+                        lines.push(`Stopped; ${steps.length - i - 1} remaining step(s) skipped.`);
+                    break;
+                }
+            }
+        }
+        if (args.snapshot_after) {
+            try {
+                lines.push('--- final snapshot ---');
+                lines.push(compact(await this.handleMcpToolCall('wrave_get_snapshot', args.tab_id !== undefined ? { tab_id: args.tab_id } : {})));
+            }
+            catch (err) {
+                lines.push(`snapshot failed: ${err.message}`);
+            }
+        }
+        lines.push(`(batch ${failed ? 'finished with errors' : 'ok'} in ${Date.now() - started}ms)`);
+        return { _text: lines.join('\n'), _isError: failed };
     }
     async handleRpcMessage(msg, callerName = 'AI Harness') {
         const { id, method, params = {} } = msg;
@@ -425,8 +353,9 @@ export class WraveMcpServer {
                     },
                     serverInfo: {
                         name: 'wrave-mcp-server',
-                        version: '1.2.1',
+                        version: '1.3.0',
                     },
+                    instructions: SERVER_INSTRUCTIONS,
                 },
             };
         }
@@ -451,6 +380,7 @@ export class WraveMcpServer {
             try {
                 const toolResult = await this.handleMcpToolCall(toolName, toolArgs, callerName);
                 const content = [];
+                let isError = false;
                 if (toolResult && toolResult._isImage) {
                     content.push({
                         type: 'image',
@@ -458,16 +388,17 @@ export class WraveMcpServer {
                         mimeType: toolResult.mimeType || 'image/png',
                     });
                 }
+                else if (toolResult && typeof toolResult._text === 'string') {
+                    content.push({ type: 'text', text: toolResult._text });
+                    isError = !!toolResult._isError;
+                }
                 else {
-                    content.push({
-                        type: 'text',
-                        text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2),
-                    });
+                    content.push({ type: 'text', text: compact(toolResult) });
                 }
                 return {
                     jsonrpc: '2.0',
                     id,
-                    result: { content, isError: false },
+                    result: { content, isError },
                 };
             }
             catch (err) {
@@ -575,7 +506,7 @@ export class WraveMcpServer {
                     res.end(JSON.stringify({
                         status: 'running',
                         name: 'wrave-mcp-server',
-                        version: '1.2.1',
+                        version: '1.3.0',
                         securityMode: this.cdpEngine?.securityMode || 'ask_validation',
                         cdpConnected: cdpAvailable,
                         extensionConnected: !!(this.extensionSocket && this.extensionSocket.readyState === WebSocket.OPEN),

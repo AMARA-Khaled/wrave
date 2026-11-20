@@ -72,16 +72,29 @@ function saveTokenToAppData(token: string, port: number): string | null {
 }
 
 async function runStdioMode(options: CliOptions): Promise<void> {
-  const mcpServer = new WraveMcpServer({
-    cdpOptions: {
-      host: options.cdpHost,
-      port: options.cdpPort,
-      securityMode: options.securityMode,
-    },
-  });
+  const port = options.port || 8282;
+  let forwardToServer = false;
+  try {
+    const probe = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(800) });
+    if (probe.ok) {
+      forwardToServer = true;
+    }
+  } catch {}
 
-  // Start internal WebSocket bridge so Brave extension connects quietly on port 8282
-  await mcpServer.startBridgeOnly(options.port || 8282, options.host || '127.0.0.1');
+  let mcpServer: WraveMcpServer | null = null;
+  if (!forwardToServer) {
+    mcpServer = new WraveMcpServer({
+      cdpOptions: {
+        host: options.cdpHost,
+        port: options.cdpPort,
+        securityMode: options.securityMode,
+      },
+    });
+    const bridgeOk = await mcpServer.startBridgeOnly(port, options.host || '127.0.0.1');
+    if (!bridgeOk) {
+      forwardToServer = true;
+    }
+  }
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -93,7 +106,17 @@ async function runStdioMode(options: CliOptions): Promise<void> {
     if (!line.trim()) return;
     try {
       const msg = JSON.parse(line);
-      const res = await mcpServer.handleRpcMessage(msg, 'Stdio Client');
+      let res;
+      if (forwardToServer) {
+        const httpRes = await fetch(`http://127.0.0.1:${port}/mcp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(msg),
+        });
+        res = await httpRes.json();
+      } else {
+        res = await mcpServer!.handleRpcMessage(msg, 'Stdio Client');
+      }
       if (res) {
         process.stdout.write(JSON.stringify(res) + '\n');
       }

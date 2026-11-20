@@ -5,6 +5,8 @@
 import assert from 'node:assert';
 import http from 'node:http';
 import { WraveMcpServer } from '../mcp-server.js';
+import { normalizeUrl } from '../cdp-engine.js';
+import { formatSnapshot } from '../tool-definitions.js';
 
 async function runTestSuite(): Promise<void> {
   console.log('🧪 Starting Wrave MCP Automated Test Suite...\n');
@@ -97,7 +99,45 @@ async function runTestSuite(): Promise<void> {
     assert(toolNames.has('wrave_get_snapshot'), 'Missing wrave_get_snapshot');
     assert(toolNames.has('wrave_click_and_read'), 'Missing wrave_click_and_read');
     assert(toolNames.has('wrave_type_and_submit'), 'Missing wrave_type_and_submit');
-    console.log(`[PASS] tools/list returned ${toolsRes.result.tools.length} browser automation primitives (including compound snapshot & interaction tools)`);
+    for (const t of ['wrave_navigate', 'wrave_get_text', 'wrave_wait_for', 'wrave_fill_form', 'wrave_select_option', 'wrave_hover', 'wrave_batch']) {
+      assert(toolNames.has(t), `Missing ${t}`);
+    }
+    for (const t of toolsRes.result.tools) {
+      if (!['wrave_close_tab', 'wrave_focus_tab'].includes(t.name)) {
+        assert(!(t.inputSchema.required || []).includes('tab_id'), `${t.name} should not require tab_id`);
+      }
+    }
+    assert(typeof initRes.result.instructions === 'string' && initRes.result.instructions.includes('wrave_batch'), 'Expected server instructions');
+    console.log(`[PASS] tools/list returned ${toolsRes.result.tools.length} browser automation primitives (tab_id optional, batch/navigate/form tools present)`);
+
+    // 4b. Batch validation and error reporting (no browser needed)
+    const batchRes = (await fetch(`http://127.0.0.1:${testPort}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${testToken}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'wrave_batch', arguments: { steps: [{ tool: 'wrave_batch' }, { tool: 'wrave_list_tabs' }] } } }),
+    }).then((r) => r.json())) as any;
+    assert.strictEqual(batchRes.result.isError, true);
+    assert(batchRes.result.content[0].text.includes('Nested batches are not allowed'));
+    assert(batchRes.result.content[0].text.includes('1 remaining step(s) skipped'));
+    console.log('[PASS] wrave_batch stops on first error and reports skipped steps');
+
+    // 4c. Pure helpers
+    assert.strictEqual(normalizeUrl('example.com'), 'https://example.com');
+    assert.strictEqual(normalizeUrl('localhost:3000/x'), 'http://localhost:3000/x');
+    assert.strictEqual(normalizeUrl('http://a.b'), 'http://a.b');
+    assert.strictEqual(normalizeUrl('about:blank'), 'about:blank');
+    assert.strictEqual(normalizeUrl('example.com:8080/p'), 'https://example.com:8080/p');
+    const snapText = formatSnapshot({
+      title: 'T', url: 'https://x', total: 3, truncated: true,
+      elements: [
+        { ref: '@1', tag: 'input', type: 'email', placeholder: 'Email', value: 'a@b.c' },
+        { ref: '@2', tag: 'a', text: 'Next', href: '/next' },
+      ],
+    });
+    assert(snapText.includes('@1 input[email] placeholder="Email" value="a@b.c"'), snapText);
+    assert(snapText.includes('@2 link "Next" -> /next'), snapText);
+    assert(snapText.includes('2 of 3 elements shown'), snapText);
+    console.log('[PASS] normalizeUrl and compact snapshot formatting verified');
 
     // 5. Test SSE stream handshake and bidirectional message routing
     const controller = new AbortController();

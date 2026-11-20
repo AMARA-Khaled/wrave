@@ -19,10 +19,24 @@ export declare class WraveMcpServer {
     extensionSocket: WebSocket | null;
     private pendingBridgeRequests;
     private bridgeMessageId;
+    private lastCdpTabId;
+    private lastBridgeTabId;
     constructor(options?: McpServerOptions);
     getToolsDefinition(): McpToolDefinition[];
     sendBridgeCommand(method: string, params?: Record<string, any>, timeoutMs?: number): Promise<any>;
+    /**
+     * Resolve the tab a tool call targets. An explicit tab_id becomes the new default;
+     * otherwise the last used tab is reused, falling back to the most recent page tab.
+     */
+    private resolveCdpTab;
     handleMcpToolCall(name: string, args?: Record<string, any>, _callerName?: string): Promise<any>;
+    private snapshotOpts;
+    /** Appends a formatted snapshot to an action result when requested. */
+    private withSnapshot;
+    private callCdpTool;
+    private callBridgeTool;
+    /** Runs several tool calls sequentially inside one MCP round trip. */
+    private runBatch;
     handleRpcMessage(msg: JsonRpcRequest, callerName?: string): Promise<JsonRpcResponse | null>;
     start(): Promise<{
         port: number;

@@ -63,15 +63,29 @@ function saveTokenToAppData(token, port) {
     }
 }
 async function runStdioMode(options) {
-    const mcpServer = new WraveMcpServer({
-        cdpOptions: {
-            host: options.cdpHost,
-            port: options.cdpPort,
-            securityMode: options.securityMode,
-        },
-    });
-    // Start internal WebSocket bridge so Brave extension connects quietly on port 8282
-    await mcpServer.startBridgeOnly(options.port || 8282, options.host || '127.0.0.1');
+    const port = options.port || 8282;
+    let forwardToServer = false;
+    try {
+        const probe = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(800) });
+        if (probe.ok) {
+            forwardToServer = true;
+        }
+    }
+    catch { }
+    let mcpServer = null;
+    if (!forwardToServer) {
+        mcpServer = new WraveMcpServer({
+            cdpOptions: {
+                host: options.cdpHost,
+                port: options.cdpPort,
+                securityMode: options.securityMode,
+            },
+        });
+        const bridgeOk = await mcpServer.startBridgeOnly(port, options.host || '127.0.0.1');
+        if (!bridgeOk) {
+            forwardToServer = true;
+        }
+    }
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
@@ -82,7 +96,18 @@ async function runStdioMode(options) {
             return;
         try {
             const msg = JSON.parse(line);
-            const res = await mcpServer.handleRpcMessage(msg, 'Stdio Client');
+            let res;
+            if (forwardToServer) {
+                const httpRes = await fetch(`http://127.0.0.1:${port}/mcp`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(msg),
+                });
+                res = await httpRes.json();
+            }
+            else {
+                res = await mcpServer.handleRpcMessage(msg, 'Stdio Client');
+            }
             if (res) {
                 process.stdout.write(JSON.stringify(res) + '\n');
             }

@@ -149,40 +149,55 @@ Add to `~/.cursor/mcp.json` or `~/.codeium/windsurf/mcp_config.json`:
 
 ---
 
-## Available MCP Tools (21 Primitives)
+## Available MCP Tools (28)
 
-### Compound Actions (1-Turn)
-| Tool Name | Description | Parameters |
-|---|---|---|
-| `wrave_get_snapshot` | Instant page snapshot with indexed interactive elements (`@1`, `@2`, etc.), title, and URL. | `tab_id` |
-| `wrave_click_and_read` | Click an element (by selector, `@ref` like `@1`, or x/y) and immediately return the updated page snapshot. | `tab_id`, `selector`, `x`, `y` |
-| `wrave_type_and_submit` | Type text into an input or contenteditable field and submit with Enter in 1 turn. | `tab_id`, `selector`, `text`, `clear_first`, `submit_key` |
+`tab_id` is optional on every tool except close/focus: it defaults to the tab you last opened or used. Element targets accept a snapshot ref (`@3`), a CSS selector, or `text:Visible label`. Actions wait for navigations, in-flight requests and DOM updates to settle before returning, so fixed sleeps are unnecessary.
 
-### Core Navigation & Inspection
-| Tool Name | Description | Parameters |
+### Fast Paths
+| Tool Name | Description | Key Parameters |
 |---|---|---|
-| `wrave_list_tabs` | List all open tabs with ID, title, URL, and active state. | *None* |
-| `wrave_open_tab` | Open a new tab with specified URL (auto-returns page snapshot & indexed elements). | `url`, `activate` (bool) |
-| `wrave_close_tab` | Close an open tab by its ID. | `tab_id` |
-| `wrave_focus_tab` | Bring tab to foreground and activate it. | `tab_id` |
-| `wrave_reload_tab` | Reload tab with optional cache bypass. | `tab_id`, `ignore_cache` |
-| `wrave_get_tab_state` | Read title, URL, viewport dimensions, and scroll position. | `tab_id` |
-| `wrave_get_dom_tree` | Extract clean, LLM-friendly DOM tree with bounding boxes `[x, y, w, h]` or raw HTML. | `tab_id`, `max_depth`, `html` |
-| `wrave_get_accessibility_tree` | Extract full AX accessibility tree (roles, labels, values). | `tab_id` |
-| `wrave_take_screenshot` | Capture viewport or full-page screenshot as base64 image. | `tab_id`, `full_page`, `format` |
+| `wrave_batch` | Run several tools in sequence in one call; stops on first error. | `steps` [{tool, args}], `stop_on_error`, `snapshot_after` |
+| `wrave_fill_form` | Fill text inputs, selects and checkboxes in one call, optionally click submit. | `fields` [{selector, value}], `submit` |
+| `wrave_get_snapshot` | Compact one-line-per-element list of interactive elements with `@refs`, values, options and state. | `max_elements`, `viewport_only`, `include_boxes` |
+| `wrave_get_text` | Readable text of the page or one element. | `selector`, `max_chars` |
+| `wrave_click_and_read` | Click, wait for the page to settle, return the updated snapshot. | `selector`, `x`, `y` |
+| `wrave_type_and_submit` | Type into a field, press Enter, wait for the result. | `selector`, `text`, `clear_first`, `submit_key` |
 
-### Direct Interaction Primitives
-| Tool Name | Description | Parameters |
+### Tabs & Navigation
+| Tool Name | Description | Key Parameters |
 |---|---|---|
-| `wrave_click` | Dispatch click to element selector, `@ref` (e.g. `@1`), or pixel coordinates. | `tab_id`, `selector`, `x`, `y` |
-| `wrave_double_click` | Dispatch double-click to element selector or `@ref`. | `tab_id`, `selector` |
-| `wrave_type_text` | Type text into inputs, textareas, and rich contenteditable editors (`@ref` supported). | `tab_id`, `selector`, `text`, `clear_first` |
-| `wrave_press_key` | Dispatch native keyboard key event (Enter, Tab, Escape, etc.). | `tab_id`, `key` |
-| `wrave_scroll_page` | Scroll viewport or target scrollable container. | `tab_id`, `delta_y`, `delta_x` |
-| `wrave_execute_script` | Evaluate arbitrary JavaScript expression in tab context. | `tab_id`, `script` |
-| `wrave_get_cookies` | Retrieve cookies for the active domain. | `tab_id` |
-| `wrave_print_to_pdf` | Export active page to PDF document. | `tab_id` |
-| `wrave_get_console_logs` | Retrieve intercepted console logs from the page. | `tab_id` |
+| `wrave_list_tabs` | List open tabs (id, title, url). | *None* |
+| `wrave_open_tab` | Open a URL, wait for load, return tab id plus snapshot. | `url`, `activate`, `snapshot` |
+| `wrave_navigate` | Load a URL or go back/forward/reload in the current tab, return snapshot. | `url`, `action`, `timeout_ms` |
+| `wrave_close_tab` | Close a tab. | `tab_id` |
+| `wrave_focus_tab` | Bring a tab to the foreground and make it the default. | `tab_id` |
+| `wrave_reload_tab` | Reload and wait for load. | `ignore_cache` |
+| `wrave_wait_for` | Wait for a selector or text to appear (or disappear), or for the page to settle. | `selector`, `text`, `gone`, `timeout_ms` |
+
+### Interaction
+| Tool Name | Description | Key Parameters |
+|---|---|---|
+| `wrave_click` | Click an element (auto scroll-into-view) or coordinates. | `selector`, `x`, `y`, `snapshot` |
+| `wrave_double_click` | Double-click an element or coordinates. | `selector`, `x`, `y` |
+| `wrave_hover` | Move the mouse over an element. | `selector` |
+| `wrave_type_text` | Insert text instantly into inputs, textareas and contenteditable editors. | `selector`, `text`, `clear_first` |
+| `wrave_press_key` | Press a key or combo (Enter, Tab, ArrowDown, Control+a, Shift+Tab). | `key`, `repeat` |
+| `wrave_select_option` | Choose a native `<select>` option by value or label. | `selector`, `value` |
+| `wrave_scroll_page` | Scroll by amount, to top/bottom, or to an element. | `delta_y`, `to`, `selector` |
+
+### Inspection & Diagnostics
+| Tool Name | Description | Key Parameters |
+|---|---|---|
+| `wrave_get_tab_state` | Title, URL, load state, viewport and scroll position. | *None* |
+| `wrave_get_dom_tree` | Nested DOM tree with bounding boxes, or raw HTML (extension mode). | `max_depth`, `html` |
+| `wrave_get_accessibility_tree` | Compact accessibility outline, one `role "name"` per line. | `max_nodes` |
+| `wrave_take_screenshot` | Viewport or full-page screenshot (JPEG by default). | `full_page`, `format`, `quality` |
+| `wrave_execute_script` | Evaluate JavaScript in the page (top-level await supported). | `script` |
+| `wrave_get_cookies` | Cookies for the current page. | *None* |
+| `wrave_print_to_pdf` | Save the page as a PDF file and return its path. | `path` |
+| `wrave_get_console_logs` | Console messages and uncaught exceptions. | `clear` |
+
+In extension-bridge mode (no `--remote-debugging-port`), `wrave_hover`, `wrave_select_option`, `wrave_fill_form`, `wrave_wait_for`, back/forward navigation, the accessibility tree, PDF export and console logs require CDP.
 
 ---
 

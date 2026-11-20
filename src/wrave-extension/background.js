@@ -73,7 +73,7 @@ async function initBridge() {
           ws.send(JSON.stringify({
             type: 'register',
             client: 'brave-extension',
-            version: '1.2.1'
+            version: '1.3.0'
           }));
         }
       } catch (sendErr) {
@@ -209,7 +209,9 @@ async function handleCompanionCommand(cmd) {
       case 'page_navigate': {
         const tabId = params.tabId ? parseInt(params.tabId, 10) : (await getActiveTabId());
         await chrome.tabs.update(tabId, { url: params.url });
-        reply({ success: true, tabId, url: params.url });
+        await waitForTabComplete(tabId, 15000);
+        const snapshot = await captureTabSnapshot(tabId);
+        reply({ success: true, tabId, ...snapshot });
         break;
       }
 
@@ -568,6 +570,9 @@ async function captureTabSnapshot(tabId) {
         const candidates = Array.from(document.querySelectorAll(
           'a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="tab"], [role="menuitem"], [role="checkbox"], [contenteditable="true"], [tabindex="0"]'
         ));
+
+        // Clear refs from earlier snapshots so a stale @N never matches the wrong element.
+        for (const old of document.querySelectorAll('[data-wrave-ref]')) old.removeAttribute('data-wrave-ref');
 
         let refIdx = 1;
         const elements = [];
